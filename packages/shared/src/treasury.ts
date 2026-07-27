@@ -267,7 +267,10 @@ export const similarityClusterSchema = z.object({
   theme: z.string(),
   agentRationale: z.string(),
   agentId: z.string(),
-  method: z.enum(["embeddings", "lexical"]),
+  // "llm" covers grouping produced by a language model reasoning over the submissions, which is
+  // what the Converge agent does on Workers AI. Kept distinct from "embeddings" so the UI never
+  // claims a vector-similarity provenance the run did not actually have.
+  method: z.enum(["embeddings", "lexical", "llm"]),
   model: z.string(),
   keywords: z.array(z.string()).default([]),
   cohesion: z.number().min(0).max(1).nullable().default(null),
