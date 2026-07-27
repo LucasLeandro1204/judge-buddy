@@ -1,5 +1,8 @@
 require("dotenv").config();
 require("@nomicfoundation/hardhat-ethers");
+// Registers .to.be.revertedWithCustomError / .to.emit. Without it the treasury tests fail
+// with "Invalid Chai property" rather than actually asserting anything.
+require("@nomicfoundation/hardhat-chai-matchers");
 
 /** @type import('hardhat/config').HardhatUserConfig */
 module.exports = {
