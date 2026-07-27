@@ -15,7 +15,9 @@
  *   propose_award        proposeAward                             (award exists on-chain)
  *   settle_autonomous    executeAutonomousPayout                  (below the ceiling only)
  */
-import { id as toOnchainId } from "ethers";
+import { Interface, id as toOnchainId } from "ethers";
+import { buildAwardApprovalTypedData } from "../../../packages/shared/src/treasury.js";
+import { buildClearSigningManifest } from "../../../packages/ledger-clear-signing/src/index.js";
 import type { Env } from "../lib/env.js";
 import { canWriteChain } from "../lib/env.js";
 import { GAS_LIMITS, getTreasuryWrite, hashEvidence } from "../lib/hedera.js";
@@ -299,6 +301,104 @@ export async function settleAutonomous(env: Env, awardId: string): Promise<JobHa
   return { ok: true, note: `paid ${award.amount} at ${txHash}` };
 }
 
+// ── step 4b: build the approval an above-ceiling award needs ────────────────
+
+/** Approvals are valid for a week — long enough for a judge to sign, short enough to expire. */
+const APPROVAL_TTL_SECONDS = 7 * 24 * 60 * 60;
+
+/**
+ * Materialises the EIP-712 payload and the Ledger clear-signing manifest a judge signs.
+ *
+ * The first Workers port left this a no-op with a comment claiming the API layer built it. The
+ * API layer never did — `POST /awards/:id/approve` looks the row up and 404s when it is missing.
+ * The effect was that every claim_token award parked in `awaiting_approval` with an empty
+ * approval queue and no way forward, so the whole above-the-ceiling path was unreachable in
+ * production even though the contract implements it.
+ */
+export async function requestApproval(env: Env, awardId: string): Promise<JobHandlerResult> {
+  const award = await store.getAwardProposal(env.DB, awardId);
+  if (!award) throw new Error(`Award ${awardId} not found`);
+
+  // Re-running the job must not mint a second request; award_id is unique on the table anyway.
+  const existing = await store.getApprovalRequestByAwardId(env.DB, awardId);
+  if (existing) return { ok: true, note: `approval ${existing.id} already exists for this award` };
+
+  const hackathon = await store.getHackathon(env.DB, award.hackathonId);
+  if (!hackathon) throw new Error(`Hackathon ${award.hackathonId} not found`);
+
+  const treasuryAddress = env.TREASURY_CONTRACT_ADDRESS;
+  if (!treasuryAddress) return { ok: false, note: "cannot build an approval without a treasury address" };
+
+  const expiresAt = Math.floor(Date.now() / 1000) + APPROVAL_TTL_SECONDS;
+  const approval = {
+    awardId: award.id,
+    hackathonId: award.hackathonId,
+    submissionId: award.submissionId,
+    trackId: award.trackId,
+    winner: award.winnerEvmAddress,
+    amount: award.amount,
+    settlementMode: award.settlementMode,
+    expiresAt,
+  };
+
+  // The contract hashes the keccak ids, not the D1 string ids — the same conversion
+  // registerSubmission and proposeAward already apply.
+  const typedData = buildAwardApprovalTypedData({
+    chainId: Number(env.HEDERA_CHAIN_ID ?? "296"),
+    verifyingContract: treasuryAddress,
+    approval: {
+      awardId: toOnchainId(approval.awardId),
+      hackathonId: toOnchainId(approval.hackathonId),
+      submissionId: toOnchainId(approval.submissionId),
+      trackId: toOnchainId(approval.trackId),
+      winner: approval.winner,
+      amount: approval.amount,
+      settlementMode: approval.settlementMode,
+      expiresAt,
+    },
+  });
+
+  const manifest = buildClearSigningManifest({
+    action: "approve_award",
+    chainId: Number(env.HEDERA_CHAIN_ID ?? "296"),
+    contractAddress: treasuryAddress,
+    contractName: "HackathonTreasury",
+    digest: typedData.digest,
+    approval,
+    calldataPreview: new Interface([
+      "function executeApprovedAward((bytes32 awardId, bytes32 hackathonId, bytes32 submissionId, bytes32 trackId, address winner, uint256 amount, uint8 settlementMode, uint256 expiresAt) approval, bytes signature) external",
+    ]).encodeFunctionData("executeApprovedAward", [typedData.value, "0x"]),
+  });
+
+  const request = await store.createApprovalRequest(env.DB, {
+    awardId: award.id,
+    actionType: "approve_award",
+    signerAccountId: hackathon.judgeAccountId,
+    signerEvmAddress: hackathon.judgeEvmAddress,
+    typedData: typedData as unknown as Record<string, unknown>,
+    clearSigningManifest: manifest as unknown as Record<string, unknown>,
+    expiresAt: new Date(expiresAt * 1000).toISOString(),
+  });
+
+  // The digest is what the judge's wallet will show and what the contract recovers against.
+  await store.updateAwardProposal(env.DB, { id: award.id, digest: typedData.digest });
+
+  await store.recordEvent(env.DB, {
+    scope: "award",
+    source: "worker",
+    type: "approval.requested",
+    actor: "treasury-agent",
+    hackathonId: award.hackathonId,
+    submissionId: award.submissionId,
+    awardId: award.id,
+    claimId: null,
+    txHash: null,
+    payload: { signer: hackathon.judgeAccountId, digest: typedData.digest, expiresAt: approval.expiresAt },
+  });
+
+  return { ok: true, note: `approval ${request.id} awaiting a signature from ${hackathon.judgeAccountId}` };
+}
+
 // ── grouping ────────────────────────────────────────────────────────────────
 
 /**
@@ -369,9 +469,7 @@ export async function handleJob(
     case "cluster_submissions":
       return clusterSubmissions(env, String(job.payload.hackathonId ?? ""));
     case "request_approval":
-      // Approval requests are built in the API layer where the EIP-712 domain and the
-      // clear-signing manifest live; nothing to do on the worker side.
-      return { ok: true, note: "approval request handled by the API layer" };
+      return requestApproval(env, awardId);
     default:
       return { ok: false, note: `unknown job type ${job.type}` };
   }
