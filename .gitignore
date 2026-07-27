@@ -28,3 +28,6 @@ dist-ssr
 *.sw?
 
 .env
+# Cloudflare local secrets
+.dev.vars
+.wrangler/
