@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowRight, Bot, CircleDollarSign, ClipboardCheck, Loader2, ShieldCheck, Trophy } from "lucide-react";
 import { fetchHackathons, fetchHealth } from "@/hackathon/api";
 import { formatDateTime, formatTokenAmount, shorten } from "@/hackathon/format";
+import { EmptyState, QueryErrorState } from "@/hackathon/QueryStates";
 import { Button } from "@/components/ui/button";
 
 const statusLabel: Record<string, string> = {
@@ -114,6 +115,14 @@ export default function HackathonIndex() {
             <Loader2 className="h-4 w-4 animate-spin" />
             Loading hackathons
           </div>
+        ) : hackathons.isError ? (
+          <QueryErrorState
+            title="Could not load hackathons"
+            description="The JudgeBuddy API did not respond, so this list is unknown rather than empty. Check that the API is reachable and try again."
+            error={hackathons.error}
+            onRetry={() => void hackathons.refetch()}
+            isRetrying={hackathons.isFetching}
+          />
         ) : hackathons.data && hackathons.data.length > 0 ? (
           <div className="space-y-4">
             {hackathons.data.map((hackathon) => (
@@ -187,9 +196,11 @@ export default function HackathonIndex() {
             ))}
           </div>
         ) : (
-          <div className="border border-border bg-card p-8 text-sm text-muted-foreground">
-            No hackathons exist yet. Create one, fund the treasury, and the rest of the workflow unlocks.
-          </div>
+          <EmptyState
+            className="p-8"
+            title="No hackathons exist yet"
+            description="Create one, fund the treasury, and the rest of the workflow unlocks."
+          />
         )}
       </section>
     </div>
