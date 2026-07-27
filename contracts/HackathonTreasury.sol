@@ -8,9 +8,11 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {HederaResponseCodes} from "@hiero-ledger/hiero-contracts/common/HederaResponseCodes.sol";
+import {HederaTokenService} from "@hiero-ledger/hiero-contracts/token-service/HederaTokenService.sol";
 import {PrizeClaimToken} from "./PrizeClaimToken.sol";
 
-contract HackathonTreasury is Ownable, ReentrancyGuard, EIP712 {
+contract HackathonTreasury is Ownable, ReentrancyGuard, EIP712, HederaTokenService {
     using SafeERC20 for IERC20;
 
     bytes32 public constant AWARD_APPROVAL_TYPEHASH =
@@ -114,6 +116,7 @@ contract HackathonTreasury is Ownable, ReentrancyGuard, EIP712 {
     error ApprovalExpired(uint256 expiresAt);
     error InvalidApprovalPayload();
     error InvalidSettlementMode(uint8 settlementMode);
+    error HederaAssociationFailed(int256 responseCode);
 
     constructor(address initialOwner, address agentRelayer_, PrizeClaimToken prizeClaimToken_)
         Ownable(initialOwner)
@@ -126,6 +129,17 @@ contract HackathonTreasury is Ownable, ReentrancyGuard, EIP712 {
     modifier onlyAgent() {
         if (msg.sender != agentRelayer && msg.sender != owner()) revert Unauthorized();
         _;
+    }
+
+    /// @notice Associates this treasury with an HTS payout token so it can be funded with one.
+    /// @dev On Hedera an account — contracts included — must be associated with an HTS token
+    ///      before it can receive any. Without this, bootstrapHackathon's safeTransferFrom into
+    ///      the treasury reverts with TOKEN_NOT_ASSOCIATED_TO_ACCOUNT. Call once per payout token,
+    ///      with value to cover the association fee, before the first bootstrap using that token.
+    ///      Plain EVM ERC-20 payout tokens need no association and can skip this entirely.
+    function associatePayoutToken(address token) external payable onlyOwner returns (int256 responseCode) {
+        responseCode = associateToken(address(this), token);
+        if (responseCode != HederaResponseCodes.SUCCESS) revert HederaAssociationFailed(responseCode);
     }
 
     function bootstrapHackathon(
