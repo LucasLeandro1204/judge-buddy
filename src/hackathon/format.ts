@@ -1,12 +1,103 @@
-export function formatTokenAmount(amount: string | number | bigint, symbol = "USDC"): string {
-  const numeric = typeof amount === "bigint" ? Number(amount) : Number(amount);
-  if (!Number.isFinite(numeric)) {
-    return `${amount} ${symbol}`;
+/**
+ * Decimals of the payout token used for prize budgets, awards, and allowances.
+ * Every amount the API stores is a *base-unit* integer string, so it must be scaled
+ * by this before it is shown to a human. Override with `VITE_PAYOUT_TOKEN_DECIMALS`
+ * when the deployment uses a token with different precision.
+ */
+export const PAYOUT_TOKEN_DECIMALS = (() => {
+  const raw = Number((import.meta.env.VITE_PAYOUT_TOKEN_DECIMALS as string | undefined)?.trim());
+  return Number.isInteger(raw) && raw >= 0 && raw <= 18 ? raw : 6;
+})();
+
+/** Display symbol for the payout token. Override with `VITE_PAYOUT_TOKEN_SYMBOL`. */
+export const PAYOUT_TOKEN_SYMBOL =
+  (import.meta.env.VITE_PAYOUT_TOKEN_SYMBOL as string | undefined)?.trim() || "USDC";
+
+function toBaseUnitsBigInt(value: string | number | bigint): bigint | null {
+  if (typeof value === "bigint") return value;
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) return null;
+    return BigInt(Math.trunc(value));
   }
-  return new Intl.NumberFormat("en-US", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(numeric) + ` ${symbol}`;
+  const trimmed = value.trim();
+  if (!/^-?\d+$/.test(trimmed)) return null;
+  try {
+    return BigInt(trimmed);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Format an integer amount of token *base units* as a human token amount.
+ *
+ * `formatTokenAmount("1000")` at 6 decimals renders `0.001 USDC`, not `1,000 USDC`.
+ */
+export function formatTokenAmount(
+  baseUnits: string | number | bigint,
+  decimals: number = PAYOUT_TOKEN_DECIMALS,
+  symbol: string = PAYOUT_TOKEN_SYMBOL,
+): string {
+  const units = toBaseUnitsBigInt(baseUnits);
+  if (units === null) {
+    return `${String(baseUnits)} ${symbol}`;
+  }
+
+  const negative = units < 0n;
+  const absolute = negative ? -units : units;
+  const divisor = 10n ** BigInt(decimals);
+  const whole = absolute / divisor;
+  const fraction = absolute % divisor;
+
+  const wholeText = new Intl.NumberFormat("en-US").format(whole);
+  const fractionText = decimals > 0 ? fraction.toString().padStart(decimals, "0").replace(/0+$/, "") : "";
+
+  const amountText = fractionText ? `${wholeText}.${fractionText}` : wholeText;
+  return `${negative ? "-" : ""}${amountText} ${symbol}`;
+}
+
+/** Render a raw base-unit integer with thousands separators, for "shows the exact integer" helper text. */
+export function formatBaseUnits(baseUnits: string | number | bigint): string {
+  const units = toBaseUnitsBigInt(baseUnits);
+  if (units === null) return String(baseUnits);
+  return new Intl.NumberFormat("en-US").format(units);
+}
+
+/**
+ * Convert a human-entered decimal amount (e.g. `"1000"` or `"1000.25"`) into the
+ * integer base-unit string the API expects. Returns `null` when the input is not a
+ * valid non-negative decimal, or carries more precision than the token supports.
+ */
+export function parseTokenAmountToBaseUnits(
+  humanAmount: string,
+  decimals: number = PAYOUT_TOKEN_DECIMALS,
+): string | null {
+  const trimmed = humanAmount.trim().replace(/,/g, "");
+  if (!/^\d+(\.\d+)?$/.test(trimmed)) return null;
+
+  const [wholePart, fractionPart = ""] = trimmed.split(".");
+  if (fractionPart.length > decimals) return null;
+
+  const padded = fractionPart.padEnd(decimals, "0");
+  const combined = `${wholePart}${padded}`.replace(/^0+(?=\d)/, "");
+  return combined.length ? combined : "0";
+}
+
+/** Inverse of {@link parseTokenAmountToBaseUnits}: base units to a plain decimal string (no symbol). */
+export function baseUnitsToTokenAmount(
+  baseUnits: string | number | bigint,
+  decimals: number = PAYOUT_TOKEN_DECIMALS,
+): string {
+  const units = toBaseUnitsBigInt(baseUnits);
+  if (units === null) return String(baseUnits);
+
+  const negative = units < 0n;
+  const absolute = negative ? -units : units;
+  const divisor = 10n ** BigInt(decimals);
+  const whole = (absolute / divisor).toString();
+  const fraction = decimals > 0 ? (absolute % divisor).toString().padStart(decimals, "0").replace(/0+$/, "") : "";
+
+  return `${negative ? "-" : ""}${fraction ? `${whole}.${fraction}` : whole}`;
 }
 
 export function formatDateTime(value: string | null | undefined): string {

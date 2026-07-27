@@ -2,7 +2,19 @@
 
 interface ImportMetaEnv {
   readonly VITE_ESCROW_USE_MOCK?: string;
+  /**
+   * Optional API base for local development (e.g. `http://localhost:3001`).
+   * When unset the app calls the same-origin `/api` mount served by the Worker.
+   */
   readonly VITE_HEDERA_API_URL?: string;
+  /** Decimals of the payout token used for prize amounts. Defaults to 6 (USDC). */
+  readonly VITE_PAYOUT_TOKEN_DECIMALS?: string;
+  /** Display symbol for the payout token. Defaults to `USDC`. */
+  readonly VITE_PAYOUT_TOKEN_SYMBOL?: string;
+  /** Deployed `HackathonTreasury` used by browser-side treasury transactions. */
+  readonly VITE_TREASURY_CONTRACT_ADDRESS?: string;
+  /** Deployed prize-claim token address. */
+  readonly VITE_PRIZE_CLAIM_TOKEN_ADDRESS?: string;
   readonly VITE_WALLETCONNECT_PROJECT_ID?: string;
   /** Optional HTS token id (0.0.x) for a USDC-style demo token in the token picker */
   readonly VITE_HEDERA_USDC_TOKEN_ID?: string;
