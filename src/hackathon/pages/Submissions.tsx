@@ -19,11 +19,24 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { fetchHackathon, fetchHackathons, queueEvaluation } from "@/hackathon/api";
 import { formatDateTime, formatTokenAmount, relativeTime, shorten } from "@/hackathon/format";
+import { EmptyState, QueryErrorState } from "@/hackathon/QueryStates";
 import { cn } from "@/lib/utils";
 
 type ViewMode = "themes" | "all";
 
-type ClusterWithSubmissions = SimilarityCluster & {
+/**
+ * A displayed group of submissions.
+ *
+ * `provenance` is non-null **only** when the grouping was produced by the server's
+ * similarity agent. When it is null the grouping is a local fallback (by track, or
+ * "not yet clustered") and the UI must not render agent/model/method badges for it —
+ * inventing those would fake the audit trail.
+ */
+type SubmissionGroup = {
+  id: string;
+  label: string;
+  description: string;
+  provenance: SimilarityCluster | null;
   submissions: SubmissionRecord[];
 };
 
@@ -85,7 +98,18 @@ function countEligible(submissions: SubmissionRecord[]): number {
 }
 
 function describeMethod(cluster: SimilarityCluster): string {
-  return cluster.method === "embeddings" ? "AI embeddings" : "Lexical fallback";
+  // Must name the method that actually ran. A binary embeddings/lexical split labelled every
+  // LLM-produced grouping "Lexical fallback", which understates and misreports the provenance.
+  switch (cluster.method) {
+    case "embeddings":
+      return "AI embeddings";
+    case "llm":
+      return "LLM grouping";
+    case "lexical":
+      return "Lexical fallback";
+    default:
+      return cluster.method;
+  }
 }
 
 function formatFitLabel(fit: "high" | "medium" | "low"): string {
@@ -154,68 +178,68 @@ export default function Submissions() {
     [detail.data?.tracks],
   );
 
-  const clusteredGroups = useMemo<ClusterWithSubmissions[]>(() => {
-    if (!detail.data) return [];
+  const submissionGroups = useMemo<SubmissionGroup[]>(() => {
+    if (!detail.data?.submissions.length) return [];
 
-    const submissionById = new Map(detail.data.submissions.map((submission) => [submission.id, submission]));
-    const clusters = (detail.data.similarityClusters ?? [])
+    const allSubmissions = detail.data.submissions;
+    const submissionById = new Map(allSubmissions.map((submission) => [submission.id, submission]));
+
+    const agentClusters = (detail.data.similarityClusters ?? [])
       .map((cluster) => ({
-        ...cluster,
+        cluster,
         submissions: cluster.submissionIds
           .map((submissionId) => submissionById.get(submissionId))
           .filter((submission): submission is SubmissionRecord => Boolean(submission)),
       }))
-      .filter((cluster) => cluster.submissions.length > 0);
+      .filter((entry) => entry.submissions.length > 0);
 
-    const coveredIds = new Set(clusters.flatMap((cluster) => cluster.submissions.map((submission) => submission.id)));
-    const remainder = detail.data.submissions.filter((submission) => !coveredIds.has(submission.id));
+    // No server clusters: fall back to grouping by sponsor track. No agent, model, or
+    // method is attached, because the similarity agent has produced nothing to attribute.
+    if (!agentClusters.length) {
+      const byTrack = new Map<string, SubmissionRecord[]>();
+      for (const submission of allSubmissions) {
+        const existing = byTrack.get(submission.trackId);
+        if (existing) existing.push(submission);
+        else byTrack.set(submission.trackId, [submission]);
+      }
 
-    if (!clusters.length && detail.data.submissions.length) {
-      return [
-        {
-          id: "cluster-all-submissions",
-          label: "All submissions",
-          theme: "Review every project in a single stream.",
-          agentRationale: "No strong theme split is available yet, so the queue falls back to a unified review list.",
-          agentId: "converge-similarity",
-          method: "lexical",
-          model: "local-review-stream",
-          keywords: [],
-          cohesion: null,
-          clusteredAt: detail.data.submissions[0]?.updatedAt ?? new Date().toISOString(),
-          submissionIds: detail.data.submissions.map((submission) => submission.id),
-          submissions: detail.data.submissions,
-        },
-      ];
+      return [...byTrack.entries()].map(([trackId, submissions]) => ({
+        id: `track-${trackId}`,
+        label: trackLookup.get(trackId)?.name ?? trackId,
+        description: "Grouped by track — the similarity agent has not run for this hackathon yet.",
+        provenance: null,
+        submissions,
+      }));
     }
 
+    const groups: SubmissionGroup[] = agentClusters.map(({ cluster, submissions }) => ({
+      id: cluster.id,
+      label: cluster.label,
+      description: cluster.theme,
+      provenance: cluster,
+      submissions,
+    }));
+
+    const coveredIds = new Set(groups.flatMap((group) => group.submissions.map((submission) => submission.id)));
+    const remainder = allSubmissions.filter((submission) => !coveredIds.has(submission.id));
+
     if (remainder.length) {
-      clusters.push({
-        id: "cluster-independent-ideas",
-        label: remainder.length === 1 ? "Independent idea" : "Other ideas",
-        theme:
-          remainder.length === 1
-            ? "A standalone project without a close thematic neighbor in the current field."
-            : "Projects that do not yet land in the stronger theme neighborhoods.",
-        agentRationale:
-          remainder.length === 1
-            ? `${remainder[0].projectName} stands apart from the main theme groupings.`
-            : "These submissions are better reviewed individually than forced into a loose cluster.",
-        agentId: "converge-similarity",
-        method: "lexical",
-        model: "local-residual-pass",
-        keywords: [],
-        cohesion: null,
-        clusteredAt: remainder[0]?.updatedAt ?? new Date().toISOString(),
-        submissionIds: remainder.map((submission) => submission.id),
+      groups.push({
+        id: "ungrouped-submissions",
+        label: "Not yet clustered",
+        description: "The similarity agent has not assigned these submissions to a theme.",
+        provenance: null,
         submissions: remainder,
       });
     }
 
-    return clusters;
-  }, [detail.data]);
+    return groups;
+  }, [detail.data, trackLookup]);
 
-  const effectiveViewMode = viewMode === "themes" && clusteredGroups.length > 0 ? "themes" : "all";
+  const hasAgentClusters = submissionGroups.some((group) => group.provenance !== null);
+  const groupingLabel = hasAgentClusters ? "By theme" : "By track";
+  const groupCountLabel = hasAgentClusters ? "themes" : "track groups";
+  const effectiveViewMode = viewMode === "themes" && submissionGroups.length > 0 ? "themes" : "all";
 
   const queueMutation = useMutation({
     mutationFn: async (submissionId: string) => queueEvaluation(submissionId, true),
@@ -325,6 +349,17 @@ export default function Submissions() {
         </div>
       </div>
 
+      {hackathons.isError ? (
+        <QueryErrorState
+          className="rounded-[24px]"
+          title="Could not load hackathons"
+          description="The event list could not be fetched, so the selector above is empty because the API is unreachable — not because no hackathons exist."
+          error={hackathons.error}
+          onRetry={() => void hackathons.refetch()}
+          isRetrying={hackathons.isFetching}
+        />
+      ) : null}
+
       {detail.isLoading ? (
         <div className="flex items-center gap-3 rounded-[24px] border border-white/10 bg-card/70 p-6 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />
@@ -355,7 +390,7 @@ export default function Submissions() {
                     )}
                   >
                     <LayoutGrid className="h-4 w-4" />
-                    By theme
+                    {groupingLabel}
                   </button>
                   <button
                     type="button"
@@ -373,7 +408,9 @@ export default function Submissions() {
                 <div className="flex flex-wrap items-center gap-3 text-[11px] font-mono uppercase tracking-[0.24em] text-muted-foreground">
                   <span>{detail.data.submissions.length} submitted</span>
                   <span className="text-white/20">•</span>
-                  <span>{clusteredGroups.length} themes</span>
+                  <span>
+                    {submissionGroups.length} {groupCountLabel}
+                  </span>
                   <span className="text-white/20">•</span>
                   <span>{detail.data.tracks.length} sponsor tracks</span>
                 </div>
@@ -389,69 +426,101 @@ export default function Submissions() {
             <div className="grid gap-8 xl:grid-cols-[minmax(0,1.55fr)_minmax(340px,0.95fr)]">
               <section className="min-w-0 space-y-5">
                 {effectiveViewMode === "themes" ? (
-                  clusteredGroups.map((cluster) => {
-                    const clusterAverage = averageScore(cluster.submissions);
-                    const eligibleCount = countEligible(cluster.submissions);
+                  submissionGroups.map((group) => {
+                    const provenance = group.provenance;
+                    const groupAverage = averageScore(group.submissions);
+                    const eligibleCount = countEligible(group.submissions);
                     return (
                       <article
-                        key={cluster.id}
-                        className="overflow-hidden rounded-[28px] border border-violet-500/20 bg-[linear-gradient(180deg,rgba(96,47,149,0.1),rgba(255,255,255,0.02))] p-5 shadow-[0_18px_42px_rgba(0,0,0,0.28)] sm:p-6"
+                        key={group.id}
+                        className={cn(
+                          "overflow-hidden rounded-[28px] border p-5 shadow-[0_18px_42px_rgba(0,0,0,0.28)] sm:p-6",
+                          provenance
+                            ? "border-violet-500/20 bg-[linear-gradient(180deg,rgba(96,47,149,0.1),rgba(255,255,255,0.02))]"
+                            : "border-white/10 bg-[linear-gradient(180deg,rgba(255,255,255,0.035),rgba(255,255,255,0.015))]",
+                        )}
                       >
                         <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
                           <div className="min-w-0">
                             <div className="flex items-start gap-4">
-                              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-violet-400/20 bg-violet-500/10 text-violet-200">
+                              <div
+                                className={cn(
+                                  "flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border",
+                                  provenance
+                                    ? "border-violet-400/20 bg-violet-500/10 text-violet-200"
+                                    : "border-white/10 bg-white/5 text-muted-foreground",
+                                )}
+                              >
                                 <Layers3 className="h-5 w-5" />
                               </div>
                               <div className="min-w-0">
-                                <h2 className="break-words text-2xl font-black tracking-tight text-foreground">{cluster.label}</h2>
-                                <p className="mt-2 max-w-3xl break-words text-sm leading-6 text-muted-foreground">{cluster.theme}</p>
+                                <h2 className="break-words text-2xl font-black tracking-tight text-foreground">{group.label}</h2>
+                                <p className="mt-2 max-w-3xl break-words text-sm leading-6 text-muted-foreground">{group.description}</p>
                               </div>
                             </div>
                           </div>
 
+                          {/* Provenance badges are rendered only for server-produced clusters. */}
                           <div className="flex flex-wrap items-center gap-2 text-[11px] font-mono uppercase tracking-[0.22em] text-muted-foreground">
-                            <Badge className="border border-white/10 bg-white/5 text-muted-foreground">{describeMethod(cluster)}</Badge>
-                            <Badge className="border border-white/10 bg-white/5 text-muted-foreground">{cluster.model}</Badge>
-                            <Badge className="border border-white/10 bg-white/5 text-muted-foreground">{relativeTime(cluster.clusteredAt)}</Badge>
+                            {provenance ? (
+                              <>
+                                <Badge className="border border-white/10 bg-white/5 text-muted-foreground">{describeMethod(provenance)}</Badge>
+                                <Badge className="border border-white/10 bg-white/5 text-muted-foreground">{provenance.model}</Badge>
+                                <Badge className="border border-white/10 bg-white/5 text-muted-foreground">{provenance.agentId}</Badge>
+                                <Badge className="border border-white/10 bg-white/5 text-muted-foreground">{relativeTime(provenance.clusteredAt)}</Badge>
+                              </>
+                            ) : (
+                              <Badge className="border border-white/10 bg-white/5 text-muted-foreground">No agent run</Badge>
+                            )}
                           </div>
                         </div>
 
                         <div className="mt-5 rounded-[20px] border border-white/10 bg-black/20 p-4">
-                          <div className="flex items-start gap-3">
-                            <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-accent" />
-                            <p className="min-w-0 break-words text-sm leading-6 text-muted-foreground">{cluster.agentRationale}</p>
-                          </div>
+                          {provenance ? (
+                            <>
+                              <div className="flex items-start gap-3">
+                                <Sparkles className="mt-0.5 h-4 w-4 shrink-0 text-accent" />
+                                <p className="min-w-0 break-words text-sm leading-6 text-muted-foreground">{provenance.agentRationale}</p>
+                              </div>
 
-                          <div className="mt-4 flex flex-wrap gap-2">
-                            {cluster.keywords.slice(0, 4).map((keyword) => (
-                              <Badge key={keyword} className="border border-white/10 bg-white/5 text-muted-foreground">
-                                {keyword}
-                              </Badge>
-                            ))}
-                          </div>
+                              <div className="mt-4 flex flex-wrap gap-2">
+                                {provenance.keywords.slice(0, 4).map((keyword) => (
+                                  <Badge key={keyword} className="border border-white/10 bg-white/5 text-muted-foreground">
+                                    {keyword}
+                                  </Badge>
+                                ))}
+                              </div>
+                            </>
+                          ) : (
+                            <p className="break-words text-sm leading-6 text-muted-foreground">
+                              This grouping is derived locally from the sponsor track on each submission. No similarity agent has
+                              produced a clustering for this hackathon, so there is no model, method, or agent run to attribute it to.
+                            </p>
+                          )}
 
                           <div className="mt-5 grid gap-3 sm:grid-cols-3">
                             <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
-                              <div className="text-[11px] font-mono uppercase tracking-[0.22em] text-muted-foreground">Theme size</div>
-                              <div className="mt-2 text-2xl font-black text-foreground">{cluster.submissions.length}</div>
+                              <div className="text-[11px] font-mono uppercase tracking-[0.22em] text-muted-foreground">
+                                {provenance ? "Theme size" : "Group size"}
+                              </div>
+                              <div className="mt-2 text-2xl font-black text-foreground">{group.submissions.length}</div>
                             </div>
                             <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
                               <div className="text-[11px] font-mono uppercase tracking-[0.22em] text-muted-foreground">Avg quality</div>
-                              <div className="mt-2 text-2xl font-black text-foreground">{clusterAverage ?? "—"}</div>
+                              <div className="mt-2 text-2xl font-black text-foreground">{groupAverage ?? "—"}</div>
                             </div>
                             <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
                               <div className="text-[11px] font-mono uppercase tracking-[0.22em] text-muted-foreground">
-                                {cluster.cohesion !== null ? "Similarity" : "Eligible"}
+                                {provenance && provenance.cohesion !== null ? "Similarity" : "Eligible"}
                               </div>
                               <div className="mt-2 text-2xl font-black text-foreground">
-                                {cluster.cohesion !== null ? `${Math.round(cluster.cohesion * 100)}%` : eligibleCount}
+                                {provenance && provenance.cohesion !== null ? `${Math.round(provenance.cohesion * 100)}%` : eligibleCount}
                               </div>
                             </div>
                           </div>
                         </div>
 
-                        <div className="mt-5 space-y-3">{cluster.submissions.map((submission) => renderSubmissionCard(submission))}</div>
+                        <div className="mt-5 space-y-3">{group.submissions.map((submission) => renderSubmissionCard(submission))}</div>
                       </article>
                     );
                   })
@@ -670,10 +739,21 @@ export default function Submissions() {
             </div>
           )}
         </>
+      ) : detail.isError ? (
+        <QueryErrorState
+          className="rounded-[24px]"
+          title="Could not load submissions"
+          description="JudgeBuddy could not reach its API to load this hackathon. Nothing below is missing data — the request itself failed."
+          error={detail.error}
+          onRetry={() => void detail.refetch()}
+          isRetrying={detail.isFetching}
+        />
       ) : (
-        <div className="rounded-[24px] border border-white/10 bg-card/70 p-6 text-sm text-destructive">
-          {detail.error instanceof Error ? detail.error.message : "Could not load submissions"}
-        </div>
+        <EmptyState
+          className="rounded-[24px] border-white/10 bg-card/70"
+          title="No hackathon selected"
+          description="Pick an event above to review its submissions."
+        />
       )}
     </div>
   );
