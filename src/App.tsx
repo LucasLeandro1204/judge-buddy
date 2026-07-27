@@ -32,7 +32,7 @@ const App = () => (
           <Route path="/tasks" element={<Navigate to="/hackathon/submissions" replace />} />
           <Route path="/agents" element={<Navigate to="/hackathon/agents" replace />} />
           <Route path="/task/:id" element={<Navigate to="/hackathon/submissions" replace />} />
-          <Route path="*" element={<NotFound />} />
+          <Route path="*" element={<HackathonLayout><NotFound /></HackathonLayout>} />
         </Routes>
       </BrowserRouter>
     </TooltipProvider>
