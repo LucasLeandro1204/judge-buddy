@@ -1,0 +1,74 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "judge-buddy",
+  "main": "cf/src/index.ts",
+  "compatibility_date": "2025-11-01",
+
+  // ethers v6 reaches for node:crypto, node:buffer and node:stream.
+  "compatibility_flags": ["nodejs_compat"],
+
+  // Vite output. The API lives at /api/*; everything else falls through to the SPA so
+  // client-side routes like /hackathon/live survive a hard refresh (the old Vercel deploy
+  // returned 404 on deep links).
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application"
+  },
+
+  // Custom domain. Wrangler provisions the DNS record and the cert on the l17s.dev zone.
+  "routes": [
+    { "pattern": "judge-buddy.l17s.dev", "custom_domain": true }
+  ],
+
+  // Keep the workers.dev URL alive as a fallback; adding a route disables it otherwise.
+  "workers_dev": true,
+
+  "observability": {
+    "enabled": true
+  },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "judge-buddy",
+      "database_id": "61d65ffc-8dca-4ad2-b174-9cec5f123795"
+    }
+  ],
+
+  // Scoring agents. Replaces the OpenAI dependency: no third-party key, and inference runs
+  // on the same account the app is deployed to.
+  "ai": {
+    "binding": "AI"
+  },
+
+  // Drains the job queue. The worker loop used to be a `for(;;)` with a 3s sleep, which has
+  // no equivalent on Workers.
+  "triggers": {
+    "crons": ["* * * * *"]
+  },
+
+  "vars": {
+    "HEDERA_NETWORK": "testnet",
+    "HEDERA_EVM_RPC": "https://testnet.hashio.io/api",
+    "HEDERA_MIRROR_BASE": "https://testnet.mirrornode.hedera.com",
+    "HEDERA_CHAIN_ID": "296",
+    "WORKERS_AI_MODEL": "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+    "JOBS_PER_CRON": "5",
+
+    // Deployed 2026-07-27 to Hedera testnet. These live here rather than being passed as
+    // `wrangler deploy --var` flags: CLI vars are per-invocation and a later deploy without them
+    // silently wipes the values, which leaves the pipeline running with the chain disabled.
+    "TREASURY_CONTRACT_ADDRESS": "0xF862f3e48b05D78cE3CE1Ce0c8d16b70e54111fE",
+    "PRIZE_CLAIM_TOKEN_ADDRESS": "0x0F65EaA3E899C0d359ed6f10a5b094B0ADAbE131",
+    "PAYOUT_TOKEN_ADDRESS": "0x398cAFe2C8d16BdF6c970D3e251A899A481a0D4D"
+  }
+
+  // Secrets, set with `wrangler secret put`:
+  //   SESSION_SECRET               HMAC key for signed session cookies
+  //   TREASURY_RELAYER_PRIVATE_KEY agent relayer, signs registerSubmission/proposeAward/payout
+  //
+  // Contract addresses are set as vars by scripts/deploy-cloudflare.sh after the Hedera
+  // deploy, so they are not duplicated here:
+  //   TREASURY_CONTRACT_ADDRESS, PRIZE_CLAIM_TOKEN_ADDRESS, PAYOUT_TOKEN_ADDRESS
+}
