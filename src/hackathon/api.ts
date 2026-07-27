@@ -48,19 +48,21 @@ export const TREASURY_BROWSER_CONTRACT_ADDRESS =
 export const PRIZE_CLAIM_BROWSER_TOKEN_ADDRESS =
   (import.meta.env.VITE_PRIZE_CLAIM_TOKEN_ADDRESS as string | undefined)?.trim() ?? "";
 
-function requireApiBase(): string {
-  if (!HEDERA_API_URL) {
-    throw new Error("Set VITE_HEDERA_API_URL to connect the web app to the JudgeBuddy API.");
-  }
+/**
+ * The API base always resolves: `VITE_HEDERA_API_URL` when set (local dev against a
+ * separate API process), otherwise the same-origin `/api` mount that the production
+ * Worker serves. Nothing here throws for missing configuration.
+ */
+export function apiBaseUrl(): string {
   return HEDERA_API_URL;
 }
 
 export function isApiConfigured(): boolean {
-  return Boolean(HEDERA_API_URL);
+  return true;
 }
 
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${requireApiBase()}${path}`, {
+  const response = await fetch(`${apiBaseUrl()}${path}`, {
     ...init,
     credentials: "include",
     headers: {

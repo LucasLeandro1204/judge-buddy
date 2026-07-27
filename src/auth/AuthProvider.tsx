@@ -52,10 +52,6 @@ function toWalletConnection(state: WalletState | null, sessionUser: Authenticate
 }
 
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
-  if (!HEDERA_API_URL) {
-    throw new Error("Set VITE_HEDERA_API_URL to connect the web app to the JudgeBuddy API.");
-  }
-
   const response = await fetch(`${HEDERA_API_URL}${path}`, {
     ...init,
     credentials: "include",
@@ -114,11 +110,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [authError, setAuthError] = useState<string | null>(null);
 
   const refreshSession = useCallback(async () => {
-    if (!HEDERA_API_URL) {
-      setUser(null);
-      return;
-    }
-
     const payload = await fetchJson<SessionResponse>("/auth/session", { method: "GET" });
     const nextUser = payload.authenticated ? payload.user ?? null : null;
     setUser(nextUser);
@@ -177,9 +168,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(async () => {
     try {
-      if (HEDERA_API_URL) {
-        await fetchJson<void>("/auth/logout", { method: "POST" });
-      }
+      await fetchJson<void>("/auth/logout", { method: "POST" });
     } finally {
       setUser(null);
       setWalletState(null);
@@ -196,10 +185,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const nextWallet = await connectMetaMask();
       setWalletState(nextWallet);
-
-      if (!HEDERA_API_URL) {
-        throw new Error("Set VITE_HEDERA_API_URL before signing in.");
-      }
 
       setAuthStatus("awaiting_signature");
       const challenge = await fetchJson<AuthChallenge>("/auth/nonce", {
@@ -336,12 +321,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               </div>
             </div>
 
-            {!HEDERA_API_URL && (
-              <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-[11px] text-destructive">
-                Set <code className="font-mono">VITE_HEDERA_API_URL</code> before using the treasury app.
-              </div>
-            )}
-
             {authError && (
               <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-[11px] text-destructive">
                 <div className="flex items-start gap-2">
@@ -373,7 +352,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             <Button variant="ghost" onClick={closeAuthDialog}>
               Close
             </Button>
-            <Button type="button" onClick={() => void signInWithMetaMask()} disabled={dialogBusy || !HEDERA_API_URL}>
+            <Button
+              type="button"
+              onClick={() => {
+                // `signInWithMetaMask` rethrows so programmatic callers can react to a
+                // failure; here the error is already rendered from `authError`, so the
+                // rejection is absorbed instead of becoming an unhandled rejection.
+                void signInWithMetaMask().catch(() => undefined);
+              }}
+              disabled={dialogBusy}
+            >
               {dialogBusy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wallet className="mr-2 h-4 w-4" />}
               {authStatus === "awaiting_signature"
                 ? "Awaiting signature"
