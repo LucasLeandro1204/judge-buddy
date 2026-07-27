@@ -980,10 +980,15 @@ export async function claimNextJob(
   return { id: row.id, type: row.type, payload: parseJson<Record<string, unknown>>(row.payload, {}) };
 }
 
+/**
+ * `last_error` is cleared on success. A job that failed twice then succeeded on the third attempt
+ * otherwise keeps the stale message forever, and the operations view renders it in red beside a
+ * green 'completed' — which reads as a broken pipeline when the retry actually did its job.
+ */
 export async function completeJob(db: D1Database, id: string): Promise<void> {
   await run(
     db,
-    "update jobs set status = 'completed', lease_owner = null, lease_expires_at = null, updated_at = ? where id = ?",
+    "update jobs set status = 'completed', last_error = null, lease_owner = null, lease_expires_at = null, updated_at = ? where id = ?",
     [nowIso(), id],
   );
 }
