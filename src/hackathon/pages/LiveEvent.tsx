@@ -14,8 +14,13 @@ import {
 } from "@/hackathon/api";
 import { bootstrapHackathonTreasury, approveTreasuryFunding, readTreasuryAllowance } from "@/hackathon/evm";
 import { formatDateTime, formatTokenAmount, relativeTime, shorten } from "@/hackathon/format";
+import { EmptyState, QueryErrorState } from "@/hackathon/QueryStates";
 import { useAuth } from "@/auth/useAuth";
+import { cn } from "@/lib/utils";
 import { hashscanEvmTxUrl, hashscanTransactionMessageUrl } from "@/contracts/config";
+
+/** Hedera EVM transaction hash: 32 bytes of hex with a `0x` prefix. */
+const TX_HASH_PATTERN = /^0x[0-9a-fA-F]{64}$/;
 
 export default function LiveEvent() {
   const [params, setParams] = useSearchParams();
@@ -109,10 +114,15 @@ export default function LiveEvent() {
     },
   });
 
+  const trimmedManualTxHash = manualTxHash.trim();
+  const manualTxHashIsValid = TX_HASH_PATTERN.test(trimmedManualTxHash);
+
   const confirmExternal = useMutation({
     mutationFn: async () => {
       if (!detail.data) throw new Error("Hackathon not loaded");
-      if (!manualTxHash.trim()) throw new Error("Paste a Hedera EVM transaction hash first.");
+      if (!TX_HASH_PATTERN.test(manualTxHash.trim())) {
+        throw new Error("Paste a Hedera EVM transaction hash: 0x followed by 64 hex characters.");
+      }
       return confirmHackathonFunding(detail.data.id, manualTxHash.trim());
     },
     onSuccess: async () => {
@@ -131,7 +141,7 @@ export default function LiveEvent() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <Link
           to="/"
           className="inline-flex items-center gap-1.5 text-[11px] font-mono uppercase tracking-widest text-muted-foreground transition-colors hover:text-foreground"
@@ -140,20 +150,29 @@ export default function LiveEvent() {
           Dashboard
         </Link>
 
-        <div className="flex items-center gap-2">
-          <select
-            value={selectedHackathonId}
-            onChange={(event) => setParams({ id: event.target.value })}
-            className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-          >
-            {(hackathons.data ?? []).map((hackathon) => (
-              <option key={hackathon.id} value={hackathon.id}>
-                {hackathon.name}
-              </option>
-            ))}
-          </select>
-        </div>
+        <select
+          aria-label="Hackathon"
+          value={selectedHackathonId}
+          onChange={(event) => setParams({ id: event.target.value })}
+          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm sm:w-auto sm:max-w-xs"
+        >
+          {(hackathons.data ?? []).map((hackathon) => (
+            <option key={hackathon.id} value={hackathon.id}>
+              {hackathon.name}
+            </option>
+          ))}
+        </select>
       </div>
+
+      {hackathons.isError ? (
+        <QueryErrorState
+          title="Could not load hackathons"
+          description="The event selector is empty because the API is unreachable, not because no hackathons exist."
+          error={hackathons.error}
+          onRetry={() => void hackathons.refetch()}
+          isRetrying={hackathons.isFetching}
+        />
+      ) : null}
 
       {detail.isLoading ? (
         <div className="flex items-center gap-2 border border-border bg-card p-6 text-sm text-muted-foreground">
@@ -334,11 +353,27 @@ export default function LiveEvent() {
                             This calls <code className="font-mono">bootstrapHackathon</code> on the treasury contract and then confirms the emitted events against the API.
                           </p>
                           <div className="mt-3 flex flex-wrap gap-2">
-                            <Button onClick={() => bootstrap.mutate()} disabled={bootstrap.isPending || !TREASURY_BROWSER_CONTRACT_ADDRESS}>
+                            <Button
+                              onClick={() => bootstrap.mutate()}
+                              disabled={bootstrap.isPending || !TREASURY_BROWSER_CONTRACT_ADDRESS}
+                              title={
+                                TREASURY_BROWSER_CONTRACT_ADDRESS
+                                  ? undefined
+                                  : "This deployment has no treasury contract address configured."
+                              }
+                            >
                               {bootstrap.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                               Bootstrap treasury
                             </Button>
                           </div>
+                          {!TREASURY_BROWSER_CONTRACT_ADDRESS ? (
+                            <p className="mt-2 text-[11px] leading-5 text-muted-foreground">
+                              Disabled because this build has no treasury contract address. Set{" "}
+                              <code className="font-mono text-foreground">VITE_TREASURY_CONTRACT_ADDRESS</code> to the deployed{" "}
+                              <code className="font-mono text-foreground">HackathonTreasury</code> and rebuild, or use the external
+                              bootstrap fallback below.
+                            </p>
+                          ) : null}
                         </div>
                       </>
                     )}
@@ -348,18 +383,41 @@ export default function LiveEvent() {
                       <p className="mt-1 text-muted-foreground">
                         If you funded the treasury from another signer or script, paste the transaction hash here and JudgeBuddy will confirm the emitted Hedera EVM events.
                       </p>
-                      <div className="mt-3 flex gap-2">
+                      <div className="mt-3 flex flex-col gap-2 sm:flex-row">
                         <Input
                           value={manualTxHash}
                           onChange={(event) => setManualTxHash(event.target.value)}
                           placeholder="0x..."
-                          className="font-mono"
+                          spellCheck={false}
+                          aria-invalid={Boolean(trimmedManualTxHash) && !manualTxHashIsValid}
+                          aria-describedby="manual-tx-hash-help"
+                          className={cn(
+                            "font-mono",
+                            trimmedManualTxHash && !manualTxHashIsValid && "border-destructive focus-visible:ring-destructive",
+                          )}
                         />
-                        <Button variant="outline" onClick={() => confirmExternal.mutate()} disabled={confirmExternal.isPending}>
+                        <Button
+                          variant="outline"
+                          className="shrink-0"
+                          onClick={() => confirmExternal.mutate()}
+                          disabled={confirmExternal.isPending || !manualTxHashIsValid}
+                          title={manualTxHashIsValid ? undefined : "Enter 0x followed by 64 hex characters."}
+                        >
                           {confirmExternal.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                           Confirm
                         </Button>
                       </div>
+                      <p
+                        id="manual-tx-hash-help"
+                        className={cn(
+                          "mt-2 text-[11px] leading-5",
+                          trimmedManualTxHash && !manualTxHashIsValid ? "text-destructive" : "text-muted-foreground",
+                        )}
+                      >
+                        {trimmedManualTxHash && !manualTxHashIsValid
+                          ? "That is not a Hedera EVM transaction hash. Expected 0x followed by 64 hex characters."
+                          : "Format: 0x followed by 64 hex characters."}
+                      </p>
                     </div>
                   </div>
                 )}
@@ -424,18 +482,39 @@ export default function LiveEvent() {
                       </div>
                     );
                   })}
-                  {!events.data?.length ? (
-                    <p className="text-sm text-muted-foreground">No events recorded for this hackathon yet.</p>
+                  {events.isError ? (
+                    <QueryErrorState
+                      title="Could not load events"
+                      description="The audit stream could not be read, so this timeline is unknown rather than empty."
+                      error={events.error}
+                      onRetry={() => void events.refetch()}
+                      isRetrying={events.isFetching}
+                    />
+                  ) : !events.data?.length ? (
+                    <EmptyState
+                      className="bg-background/40"
+                      title="No events recorded yet"
+                      description="Funding, evaluation, and payout activity is appended here as it happens."
+                    />
                   ) : null}
                 </div>
               </div>
             </div>
           </section>
         </>
+      ) : detail.isError ? (
+        <QueryErrorState
+          title="Could not load this hackathon"
+          description="JudgeBuddy could not reach its API. The hackathon may exist — the request failed before an answer came back."
+          error={detail.error}
+          onRetry={() => void detail.refetch()}
+          isRetrying={detail.isFetching}
+        />
       ) : (
-        <div className="border border-border bg-card p-6 text-sm text-destructive">
-          {detail.error instanceof Error ? detail.error.message : "Hackathon not found"}
-        </div>
+        <EmptyState
+          title="No hackathon selected"
+          description="Pick an event above, or create one from the dashboard to begin funding a treasury."
+        />
       )}
     </div>
   );
