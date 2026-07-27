@@ -30,7 +30,12 @@ contract PrizeClaimToken is Ownable, HederaTokenService {
 
     constructor(address initialOwner) Ownable(initialOwner) {}
 
-    function initializeClaimCollection(string memory name, string memory symbol) external onlyOwner returns (address tokenAddress) {
+    /// @notice Creates the HTS non-fungible collection that backs prize claims.
+    /// @dev Must be payable. HederaTokenService.createNonFungibleToken forwards msg.value to the
+    ///      HTS system contract and token creation carries a real HBAR fee, so a non-payable
+    ///      version always failed with INSUFFICIENT_TX_FEE. Call this with value from the deploy
+    ///      script, before ownership moves to the treasury.
+    function initializeClaimCollection(string memory name, string memory symbol) external payable onlyOwner returns (address tokenAddress) {
         if (claimCollection != address(0)) {
             return claimCollection;
         }
@@ -50,9 +55,11 @@ contract PrizeClaimToken is Ownable, HederaTokenService {
         token.maxSupply = 500000;
         token.freezeDefault = false;
         token.tokenKeys = keys;
+        // autoRenewAccount must be a real account; address(0) is rejected by the HTS system
+        // contract. This contract is the token treasury, so it renews itself.
         token.expiry = IHederaTokenService.Expiry({
             second: 0,
-            autoRenewAccount: address(0),
+            autoRenewAccount: address(this),
             autoRenewPeriod: 7_776_000
         });
 
