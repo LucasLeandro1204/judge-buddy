@@ -267,6 +267,9 @@ export async function proposeAward(env: Env, submissionId: string): Promise<JobH
 
 // ── step 4: settle below the ceiling ────────────────────────────────────────
 
+/** Mirrors HackathonTreasury.AwardStatus. */
+const ON_CHAIN_PAID_OUT = 5n;
+
 export async function settleAutonomous(env: Env, awardId: string): Promise<JobHandlerResult> {
   const award = await store.getAwardProposal(env.DB, awardId);
   if (!award) throw new Error(`Award ${awardId} not found`);
@@ -277,11 +280,32 @@ export async function settleAutonomous(env: Env, awardId: string): Promise<JobHa
   }
 
   const treasury = getTreasuryWrite(env);
-  const payoutTx = await treasury.executeAutonomousPayout(toOnchainId(awardId), {
-    gasLimit: GAS_LIMITS.executeAutonomousPayout,
-  });
-  const receipt = await payoutTx.wait();
-  const txHash = receipt?.hash ?? payoutTx.hash;
+  const onchainId = toOnchainId(awardId);
+
+  // The D1 status alone is not enough to decide whether to send. If a previous attempt landed
+  // on-chain but died before writing the result back — a dropped receipt, a subrequest limit, an
+  // isolate torn down mid-await — then D1 still says unpaid while the contract says paid. Re-sending
+  // reverts with the wrong-status error, the job retries, reverts again, and eventually gives up on
+  // an award whose money has already moved. Ask the chain first and reconcile instead.
+  let alreadyPaid = false;
+  try {
+    const onchain = await treasury.awards(onchainId);
+    alreadyPaid = BigInt(onchain.status) === ON_CHAIN_PAID_OUT;
+  } catch {
+    // Unreadable state is not proof of anything; fall through and let the send decide.
+  }
+
+  let txHash: string;
+  if (alreadyPaid) {
+    console.log(`[pipeline] award ${awardId} already paid on-chain; reconciling D1 without re-sending`);
+    txHash = award.txHash ?? "";
+  } else {
+    const payoutTx = await treasury.executeAutonomousPayout(onchainId, {
+      gasLimit: GAS_LIMITS.executeAutonomousPayout,
+    });
+    const receipt = await payoutTx.wait();
+    txHash = receipt?.hash ?? payoutTx.hash;
+  }
 
   await store.updateAwardProposal(env.DB, { id: awardId, status: "paid_out", txHash });
   await store.updateSubmissionStatus(env.DB, award.submissionId, "paid");

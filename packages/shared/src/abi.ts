@@ -10,6 +10,9 @@ export const HACKATHON_TREASURY_ABI = [
   "function getAwardApprovalDigest((bytes32 awardId, bytes32 hackathonId, bytes32 submissionId, bytes32 trackId, address winner, uint256 amount, uint8 settlementMode, uint256 expiresAt) approval) view returns (bytes32)",
   "function hackathons(bytes32 hackathonId) view returns (address organizer, address judge, address payoutToken, uint256 autonomousThreshold, uint256 totalBudget, uint256 totalReserved, bool exists)",
   "function trackBudgets(bytes32 hackathonId, bytes32 trackId) view returns (uint256 budget, uint256 reserved, uint256 paid)",
+  // Lets a settlement job ask the chain whether an award already moved before re-sending it.
+  "function awards(bytes32 awardId) view returns (bytes32 hackathonId, bytes32 submissionId, bytes32 trackId, address winner, uint256 amount, uint8 settlementMode, uint8 status, bytes32 evidenceHash)",
+  "function initializeClaimCollection(string name, string symbol) external payable returns (address)",
   "event HackathonCreated(bytes32 indexed hackathonId, address indexed organizer, address indexed judge, address payoutToken, uint256 autonomousThreshold)",
   "event TreasuryFunded(bytes32 indexed hackathonId, bytes32 indexed trackId, address indexed sponsor, address payoutToken, uint256 amount, uint256 newBudget)",
   "event SubmissionRegistered(bytes32 indexed hackathonId, bytes32 indexed trackId, bytes32 indexed submissionId, address payoutRecipient, bytes32 repoHash)",
