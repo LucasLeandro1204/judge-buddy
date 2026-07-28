@@ -339,17 +339,25 @@ export default function AgentPipeline() {
 
                         <ClearSigningManifest manifest={approval.clearSigningManifest} />
 
-                        <div className="mt-4 space-y-2">
-                          <Button
-                            onClick={() => approveMutation.mutate(approval.awardId)}
-                            disabled={!canApprove || approveMutation.isPending}
-                            title={blockedReason ?? undefined}
-                          >
-                            {approveMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                            Sign and approve
-                          </Button>
-                          {blockedReason ? <p className="text-[11px] leading-5 text-muted-foreground">{blockedReason}</p> : null}
-                        </div>
+                        {/* Once the signature is in and the contract has run, there is nothing left
+                            to sign — offering the button again invites a call that can only revert. */}
+                        {approval.status === "pending" ? (
+                          <div className="mt-4 space-y-2">
+                            <Button
+                              onClick={() => approveMutation.mutate(approval.awardId)}
+                              disabled={!canApprove || approveMutation.isPending}
+                              title={blockedReason ?? undefined}
+                            >
+                              {approveMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                              Sign and approve
+                            </Button>
+                            {blockedReason ? <p className="text-[11px] leading-5 text-muted-foreground">{blockedReason}</p> : null}
+                          </div>
+                        ) : (
+                          <p className="mt-4 text-[11px] leading-5 text-muted-foreground">
+                            Signed and executed on-chain. Nothing further is required.
+                          </p>
+                        )}
                       </div>
                     );
                   })}
@@ -396,18 +404,25 @@ export default function AgentPipeline() {
                             <div className="break-all font-mono text-foreground">{claim.metadataURI ?? "—"}</div>
                           </div>
                         </div>
-                        <div className="mt-4 space-y-2">
-                          <Button
-                            variant="outline"
-                            onClick={() => redeemMutation.mutate(claim.id)}
-                            disabled={!canRedeem || redeemMutation.isPending}
-                            title={blockedReason ?? undefined}
-                          >
-                            {redeemMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                            Redeem claim
-                          </Button>
-                          {blockedReason ? <p className="text-[11px] leading-5 text-muted-foreground">{blockedReason}</p> : null}
-                        </div>
+                        {/* A redeemed claim's NFT has been burned; there is nothing left to redeem. */}
+                        {claim.status === "redeemed" ? (
+                          <p className="mt-4 text-[11px] leading-5 text-muted-foreground">
+                            Redeemed. The claim NFT was burned and the payout released to the winner.
+                          </p>
+                        ) : (
+                          <div className="mt-4 space-y-2">
+                            <Button
+                              variant="outline"
+                              onClick={() => redeemMutation.mutate(claim.id)}
+                              disabled={!canRedeem || redeemMutation.isPending}
+                              title={blockedReason ?? undefined}
+                            >
+                              {redeemMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                              Redeem claim
+                            </Button>
+                            {blockedReason ? <p className="text-[11px] leading-5 text-muted-foreground">{blockedReason}</p> : null}
+                          </div>
+                        )}
                       </div>
                     );
                   })}
