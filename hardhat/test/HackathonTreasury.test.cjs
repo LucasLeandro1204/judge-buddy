@@ -428,4 +428,34 @@ describe("HackathonTreasury", function () {
       expect(await ctx.token.balanceOf(ctx.winner.address)).to.equal(0n);
     });
   });
+
+  describe("claim collection recovery", function () {
+    // Regression test for a trap that cost a redeploy on testnet. Deployment transfers the claim
+    // token to the treasury so nothing else can mint claims, and initializeClaimCollection is
+    // onlyOwner. A deployment that skipped collection creation therefore left the only permitted
+    // caller a contract with no way to ask for it, and prizeClaimToken is immutable so it could
+    // not be repointed either. The treasury must expose a passthrough or the claim branch is
+    // stranded for the life of the deployment.
+    it("lets the treasury owner create the collection after ownership has moved", async function () {
+      const ctx = await deployStack();
+      expect(await ctx.claim.owner()).to.equal(await ctx.treasury.getAddress());
+
+      // The direct route is closed: the deployer no longer owns the claim token.
+      await expect(ctx.claim.initializeClaimCollection("JudgeBuddy Prize Claim", "JBPC")).to.be.reverted;
+
+      // The passthrough is owner-gated.
+      await expect(
+        ctx.treasury.connect(ctx.outsider).initializeClaimCollection("JudgeBuddy Prize Claim", "JBPC"),
+      ).to.be.revertedWithCustomError(ctx.treasury, "OwnableUnauthorizedAccount");
+
+      // For the owner it reaches the HTS system contract, which does not exist on the in-process
+      // EVM. Reverting *there* rather than at an access check is what proves the call got through;
+      // on Hedera this is the call that creates the collection.
+      await expect(
+        ctx.treasury.initializeClaimCollection("JudgeBuddy Prize Claim", "JBPC", {
+          value: ethers.parseEther("20"),
+        }),
+      ).to.be.reverted;
+    });
+  });
 });

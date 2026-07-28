@@ -142,6 +142,26 @@ contract HackathonTreasury is Ownable, ReentrancyGuard, EIP712, HederaTokenServi
         if (responseCode != HederaResponseCodes.SUCCESS) revert HederaAssociationFailed(responseCode);
     }
 
+    /// @notice Creates the HTS collection the prize-claim NFTs are minted from.
+    /// @dev A recovery path, and the reason this exists is worth recording. PrizeClaimToken's own
+    ///      initializeClaimCollection is onlyOwner, and deployment transfers that ownership to this
+    ///      treasury so nothing else can mint claims. Before this function existed, a deployment
+    ///      that skipped collection creation — or whose creation reverted for want of an attached
+    ///      fee — could never create it afterwards: the only account permitted to call it was a
+    ///      contract with no way to ask, and prizeClaimToken is immutable so it could not be
+    ///      repointed either. That stranded the entire claim-token settlement branch permanently
+    ///      and cost a redeploy to undo.
+    ///
+    ///      Creating an HTS token costs roughly 20 HBAR, forwarded from msg.value.
+    function initializeClaimCollection(string calldata name, string calldata symbol)
+        external
+        payable
+        onlyOwner
+        returns (address tokenAddress)
+    {
+        tokenAddress = prizeClaimToken.initializeClaimCollection{value: msg.value}(name, symbol);
+    }
+
     function bootstrapHackathon(
         bytes32 hackathonId,
         address judge,
