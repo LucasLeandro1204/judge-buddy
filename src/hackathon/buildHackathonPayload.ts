@@ -1,4 +1,5 @@
 import type { Hackathon, HackathonStatus } from "@/hackathon/types";
+import { payoutTokenSymbol } from "@/hackathon/format";
 
 export type TrackDraft = {
   name: string;
@@ -46,7 +47,7 @@ export function buildHackathonPayload(input: {
     name: input.name.trim(),
     tagline: input.tagline.trim(),
     prizePool,
-    prizeToken: "USDC",
+    prizeToken: payoutTokenSymbol() || "TOKEN",
     status,
     tracks: input.tracks.map((t, i) => ({
       id: `${slugPart(t.name)}-${i}`.slice(0, 48),

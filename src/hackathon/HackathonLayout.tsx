@@ -19,7 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { useAuth } from "@/auth/useAuth";
 import { fetchHealth } from "@/hackathon/api";
-import { shorten } from "@/hackathon/format";
+import { setPayoutTokenDisplay, shorten } from "@/hackathon/format";
 
 const navItems = [
   { path: "/", label: "Dashboard", icon: LayoutGrid },
@@ -55,6 +55,12 @@ function SidebarBody({ onNavigate }: { onNavigate?: () => void }) {
     queryFn: fetchHealth,
     retry: false,
   });
+
+  // The deployment names the payout token; recording it during render (before any page
+  // formats an amount in this pass) is what keeps a stale bundle from inventing a symbol.
+  if (health.data?.chain) {
+    setPayoutTokenDisplay(health.data.chain.payoutTokenSymbol, health.data.chain.payoutTokenDecimals);
+  }
 
   return (
     <>
@@ -153,6 +159,14 @@ function SidebarBody({ onNavigate }: { onNavigate?: () => void }) {
 export function HackathonLayout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const [drawerOpen, setDrawerOpen] = useState(false);
+
+  // Subscribe the layout itself to the (deduplicated) health query so the pages under it
+  // re-render once the payout token identity arrives — the sidebar's own subscription
+  // only re-renders the sidebar.
+  const health = useQuery({ queryKey: ["health"], queryFn: fetchHealth, retry: false });
+  if (health.data?.chain) {
+    setPayoutTokenDisplay(health.data.chain.payoutTokenSymbol, health.data.chain.payoutTokenDecimals);
+  }
 
   // A route change from inside the drawer should close it.
   useEffect(() => {

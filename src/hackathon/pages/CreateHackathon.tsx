@@ -9,8 +9,8 @@ import {
   formatDateInput,
   formatTokenAmount,
   parseTokenAmountToBaseUnits,
-  PAYOUT_TOKEN_DECIMALS,
-  PAYOUT_TOKEN_SYMBOL,
+  payoutTokenDecimals,
+  payoutTokenSymbol,
 } from "@/hackathon/format";
 import { useAuth } from "@/auth/useAuth";
 import { Button } from "@/components/ui/button";
@@ -161,14 +161,14 @@ export default function CreateHackathon() {
     if (!judgingEndsAtIso) localErrors.judgingEndsAt = "Enter a valid judging end date and time.";
 
     if (autonomousThresholdBaseUnits === null) {
-      localErrors.autonomousThreshold = `Enter a ${PAYOUT_TOKEN_SYMBOL} amount with at most ${PAYOUT_TOKEN_DECIMALS} decimal places.`;
+      localErrors.autonomousThreshold = `Enter a ${payoutTokenSymbol()} amount with at most ${payoutTokenDecimals()} decimal places.`;
     }
 
     const trackPayloads = tracks.map((track, index) => {
       const prizeAmount = trackBudgets[index];
       if (prizeAmount === null) {
         localErrors[`tracks.${index}.prizeAmount`] =
-          `Enter a ${PAYOUT_TOKEN_SYMBOL} amount with at most ${PAYOUT_TOKEN_DECIMALS} decimal places.`;
+          `Enter a ${payoutTokenSymbol()} amount with at most ${payoutTokenDecimals()} decimal places.`;
       }
       const { prizeAmountInput: _prizeAmountInput, requirementsText, ...rest } = track;
       return {
@@ -337,7 +337,7 @@ export default function CreateHackathon() {
                 <FieldError message={fieldErrors.payoutTokenEvmAddress} />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="autonomousThreshold">Autonomous payout threshold ({PAYOUT_TOKEN_SYMBOL})</Label>
+                <Label htmlFor="autonomousThreshold">Autonomous payout threshold ({payoutTokenSymbol()})</Label>
                 <Input
                   id="autonomousThreshold"
                   ref={setFieldRef("autonomousThreshold")}
@@ -350,8 +350,8 @@ export default function CreateHackathon() {
                 />
                 <p className="text-[11px] leading-5 text-muted-foreground">
                   {autonomousThresholdBaseUnits !== null
-                    ? `Sent as ${formatBaseUnits(autonomousThresholdBaseUnits)} base units (${PAYOUT_TOKEN_DECIMALS} decimals).`
-                    : `Enter a ${PAYOUT_TOKEN_SYMBOL} amount, e.g. 1000 or 1000.50.`}
+                    ? `Sent as ${formatBaseUnits(autonomousThresholdBaseUnits)} base units (${payoutTokenDecimals()} decimals).`
+                    : `Enter a ${payoutTokenSymbol()} amount, e.g. 1000 or 1000.50.`}
                 </p>
                 <FieldError message={fieldErrors.autonomousThreshold} />
               </div>
@@ -557,7 +557,7 @@ export default function CreateHackathon() {
                         <FieldError message={fieldErrors[`tracks.${index}.description`]} />
                       </div>
                       <div className="space-y-2">
-                        <Label htmlFor={`track-${index}-prize`}>Prize amount ({PAYOUT_TOKEN_SYMBOL})</Label>
+                        <Label htmlFor={`track-${index}-prize`}>Prize amount ({payoutTokenSymbol()})</Label>
                         <Input
                           id={`track-${index}-prize`}
                           ref={setFieldRef(`tracks.${index}.prizeAmount`)}
@@ -570,8 +570,8 @@ export default function CreateHackathon() {
                         />
                         <p className="text-[11px] leading-5 text-muted-foreground">
                           {baseUnits !== null
-                            ? `Sent as ${formatBaseUnits(baseUnits)} base units (${PAYOUT_TOKEN_DECIMALS} decimals).`
-                            : `Enter a ${PAYOUT_TOKEN_SYMBOL} amount with at most ${PAYOUT_TOKEN_DECIMALS} decimal places.`}
+                            ? `Sent as ${formatBaseUnits(baseUnits)} base units (${payoutTokenDecimals()} decimals).`
+                            : `Enter a ${payoutTokenSymbol()} amount with at most ${payoutTokenDecimals()} decimal places.`}
                         </p>
                         <FieldError message={fieldErrors[`tracks.${index}.prizeAmount`]} />
                       </div>

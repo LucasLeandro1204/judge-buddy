@@ -27,6 +27,15 @@ export type HealthResponse = {
   hederaEvmRpc: string;
   treasuryContractConfigured: boolean;
   prizeClaimTokenConfigured: boolean;
+  chain?: {
+    canWrite: boolean;
+    treasuryContractAddress: string | null;
+    prizeClaimTokenAddress: string | null;
+    payoutTokenAddress: string | null;
+    payoutTokenSymbol: string | null;
+    payoutTokenDecimals: number | null;
+    explorer: string | null;
+  };
 };
 
 export type JobRecord = {

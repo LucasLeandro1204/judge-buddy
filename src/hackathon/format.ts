@@ -1,17 +1,39 @@
 /**
- * Decimals of the payout token used for prize budgets, awards, and allowances.
+ * Display identity of the payout token used for prize budgets, awards, and allowances.
  * Every amount the API stores is a *base-unit* integer string, so it must be scaled
- * by this before it is shown to a human. Override with `VITE_PAYOUT_TOKEN_DECIMALS`
- * when the deployment uses a token with different precision.
+ * before it is shown to a human.
+ *
+ * The deployment — not this bundle — knows which token the treasury pays with, so both
+ * symbol and decimals arrive from `/api/health` at runtime via `setPayoutTokenDisplay`.
+ * The `VITE_PAYOUT_TOKEN_*` vars remain only as a pre-load fallback. There is no
+ * hardcoded symbol default on purpose: the first deployed bundle fell back to "USDC"
+ * and labelled every jbUSD amount with it. An amount with no symbol beats a wrong one.
  */
-export const PAYOUT_TOKEN_DECIMALS = (() => {
+const envDecimals = (() => {
   const raw = Number((import.meta.env.VITE_PAYOUT_TOKEN_DECIMALS as string | undefined)?.trim());
-  return Number.isInteger(raw) && raw >= 0 && raw <= 18 ? raw : 6;
+  return Number.isInteger(raw) && raw >= 0 && raw <= 18 ? raw : null;
 })();
+const envSymbol = (import.meta.env.VITE_PAYOUT_TOKEN_SYMBOL as string | undefined)?.trim() || null;
 
-/** Display symbol for the payout token. Override with `VITE_PAYOUT_TOKEN_SYMBOL`. */
-export const PAYOUT_TOKEN_SYMBOL =
-  (import.meta.env.VITE_PAYOUT_TOKEN_SYMBOL as string | undefined)?.trim() || "USDC";
+let runtimeDecimals: number | null = null;
+let runtimeSymbol: string | null = null;
+
+/** Record the payout token identity reported by the deployment. Idempotent. */
+export function setPayoutTokenDisplay(symbol?: string | null, decimals?: number | null): void {
+  if (typeof symbol === "string" && symbol.trim()) runtimeSymbol = symbol.trim();
+  if (typeof decimals === "number" && Number.isInteger(decimals) && decimals >= 0 && decimals <= 18) {
+    runtimeDecimals = decimals;
+  }
+}
+
+export function payoutTokenDecimals(): number {
+  return runtimeDecimals ?? envDecimals ?? 6;
+}
+
+/** Empty string until the deployment has reported the symbol. */
+export function payoutTokenSymbol(): string {
+  return runtimeSymbol ?? envSymbol ?? "";
+}
 
 function toBaseUnitsBigInt(value: string | number | bigint): bigint | null {
   if (typeof value === "bigint") return value;
@@ -31,29 +53,35 @@ function toBaseUnitsBigInt(value: string | number | bigint): bigint | null {
 /**
  * Format an integer amount of token *base units* as a human token amount.
  *
- * `formatTokenAmount("1000")` at 6 decimals renders `0.001 USDC`, not `1,000 USDC`.
+ * `formatTokenAmount("1000")` at 6 decimals renders `0.001 <symbol>`, not `1,000 <symbol>`.
+ * A value that is already human text (not an integer string) is returned unchanged.
  */
 export function formatTokenAmount(
   baseUnits: string | number | bigint,
-  decimals: number = PAYOUT_TOKEN_DECIMALS,
-  symbol: string = PAYOUT_TOKEN_SYMBOL,
+  decimals?: number,
+  symbol?: string,
 ): string {
+  const effectiveDecimals = decimals ?? payoutTokenDecimals();
+  const effectiveSymbol = symbol ?? payoutTokenSymbol();
+  const suffix = effectiveSymbol ? ` ${effectiveSymbol}` : "";
+
   const units = toBaseUnitsBigInt(baseUnits);
   if (units === null) {
-    return `${String(baseUnits)} ${symbol}`;
+    return String(baseUnits);
   }
 
   const negative = units < 0n;
   const absolute = negative ? -units : units;
-  const divisor = 10n ** BigInt(decimals);
+  const divisor = 10n ** BigInt(effectiveDecimals);
   const whole = absolute / divisor;
   const fraction = absolute % divisor;
 
   const wholeText = new Intl.NumberFormat("en-US").format(whole);
-  const fractionText = decimals > 0 ? fraction.toString().padStart(decimals, "0").replace(/0+$/, "") : "";
+  const fractionText =
+    effectiveDecimals > 0 ? fraction.toString().padStart(effectiveDecimals, "0").replace(/0+$/, "") : "";
 
   const amountText = fractionText ? `${wholeText}.${fractionText}` : wholeText;
-  return `${negative ? "-" : ""}${amountText} ${symbol}`;
+  return `${negative ? "-" : ""}${amountText}${suffix}`;
 }
 
 /** Render a raw base-unit integer with thousands separators, for "shows the exact integer" helper text. */
@@ -70,7 +98,7 @@ export function formatBaseUnits(baseUnits: string | number | bigint): string {
  */
 export function parseTokenAmountToBaseUnits(
   humanAmount: string,
-  decimals: number = PAYOUT_TOKEN_DECIMALS,
+  decimals: number = payoutTokenDecimals(),
 ): string | null {
   const trimmed = humanAmount.trim().replace(/,/g, "");
   if (!/^\d+(\.\d+)?$/.test(trimmed)) return null;
@@ -86,7 +114,7 @@ export function parseTokenAmountToBaseUnits(
 /** Inverse of {@link parseTokenAmountToBaseUnits}: base units to a plain decimal string (no symbol). */
 export function baseUnitsToTokenAmount(
   baseUnits: string | number | bigint,
-  decimals: number = PAYOUT_TOKEN_DECIMALS,
+  decimals: number = payoutTokenDecimals(),
 ): string {
   const units = toBaseUnitsBigInt(baseUnits);
   if (units === null) return String(baseUnits);
