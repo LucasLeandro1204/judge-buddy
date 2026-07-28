@@ -12,7 +12,7 @@
 import { Hono } from "hono";
 import { id as toOnchainId, verifyMessage } from "ethers";
 import type { Env } from "./lib/env.js";
-import { canWriteChain, jobsPerCron } from "./lib/env.js";
+import { canWriteChain, jobsPerCron, payoutTokenDisplay } from "./lib/env.js";
 import {
   SESSION_COOKIE,
   SESSION_MAX_AGE,
@@ -94,6 +94,10 @@ api.get("/health", async (c) => {
       treasuryContractAddress: env.TREASURY_CONTRACT_ADDRESS ?? null,
       prizeClaimTokenAddress: env.PRIZE_CLAIM_TOKEN_ADDRESS ?? null,
       payoutTokenAddress: env.PAYOUT_TOKEN_ADDRESS ?? null,
+      // The deployment names its own token; the UI must read these rather than bake a
+      // symbol into the bundle, which is how jbUSD spent a day labelled "USDC".
+      payoutTokenSymbol: payoutTokenDisplay(env).symbol,
+      payoutTokenDecimals: payoutTokenDisplay(env).decimals,
       explorer: env.TREASURY_CONTRACT_ADDRESS
         ? hashScan.contract(env.HEDERA_NETWORK, env.TREASURY_CONTRACT_ADDRESS)
         : null,

@@ -19,7 +19,7 @@ import { Interface, id as toOnchainId } from "ethers";
 import { buildAwardApprovalTypedData } from "../../../packages/shared/src/treasury.js";
 import { buildClearSigningManifest } from "../../../packages/ledger-clear-signing/src/index.js";
 import type { Env } from "../lib/env.js";
-import { canWriteChain } from "../lib/env.js";
+import { canWriteChain, payoutTokenDisplay } from "../lib/env.js";
 import { GAS_LIMITS, getTreasuryWrite, hashEvidence } from "../lib/hedera.js";
 import { runEligibility } from "./evidence.js";
 import { runConverge, runQuality, runTrackFit } from "./score.js";
@@ -389,6 +389,7 @@ export async function requestApproval(env: Env, awardId: string): Promise<JobHan
     contractName: "HackathonTreasury",
     digest: typedData.digest,
     approval,
+    token: payoutTokenDisplay(env),
     calldataPreview: new Interface([
       "function executeApprovedAward((bytes32 awardId, bytes32 hackathonId, bytes32 submissionId, bytes32 trackId, address winner, uint256 amount, uint8 settlementMode, uint256 expiresAt) approval, bytes signature) external",
     ]).encodeFunctionData("executeApprovedAward", [typedData.value, "0x"]),

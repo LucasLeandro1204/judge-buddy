@@ -69,7 +69,14 @@
 
     // Unchanged across the redeploy: the payout asset is named per hackathon at bootstrap,
     // so it is not tied to a treasury instance.
-    "PAYOUT_TOKEN_ADDRESS": "0x398cAFe2C8d16BdF6c970D3e251A899A481a0D4D"
+    "PAYOUT_TOKEN_ADDRESS": "0x398cAFe2C8d16BdF6c970D3e251A899A481a0D4D",
+
+    // Display identity of the payout token. The UI reads these from /api/health at runtime;
+    // they also feed the clear-signing manifest summary. They must never come from a
+    // build-time VITE_ var — the first deployed bundle shipped without it and labelled
+    // every jbUSD amount "USDC".
+    "PAYOUT_TOKEN_SYMBOL": "jbUSD",
+    "PAYOUT_TOKEN_DECIMALS": "6"
   }
 
   // Secrets, set with `wrangler secret put`:

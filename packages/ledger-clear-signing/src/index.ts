@@ -22,11 +22,50 @@ function settlementLabel(mode: SettlementMode): string {
   return mode === "claim_token" ? "Mint prize claim NFT" : "Release autonomous payout";
 }
 
-export function summarizeAwardApproval(approval: AwardApproval): string {
+/** Display identity of the token an amount is denominated in. */
+export type TokenDisplay = { symbol: string; decimals: number };
+
+function shortAddress(address: string): string {
+  return address.length > 14 ? `${address.slice(0, 6)}…${address.slice(-6)}` : address;
+}
+
+/** "2,500 jbUSD" when the token is known; "2500000000 base units" when it is not. */
+function formatAmount(baseUnits: string, token?: TokenDisplay): string {
+  if (!token || !/^-?\d+$/.test(baseUnits)) return `${baseUnits} base units`;
+  const units = BigInt(baseUnits);
+  const negative = units < 0n;
+  const absolute = negative ? -units : units;
+  const divisor = 10n ** BigInt(token.decimals);
+  const whole = new Intl.NumberFormat("en-US").format(absolute / divisor);
+  const fraction =
+    token.decimals > 0 ? (absolute % divisor).toString().padStart(token.decimals, "0").replace(/0+$/, "") : "";
+  return `${negative ? "-" : ""}${fraction ? `${whole}.${fraction}` : whole} ${token.symbol}`;
+}
+
+/** "Aug 4, 2026, 00:15 UTC" — unambiguous for a signer in any locale. */
+function formatExpiry(expiresAtSeconds: number): string {
+  const formatted = new Intl.DateTimeFormat("en-US", {
+    timeZone: "UTC",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date(expiresAtSeconds * 1000));
+  return `${formatted} UTC`;
+}
+
+/**
+ * The sentence a signer reads before anything else. It must carry no raw base units and
+ * no ISO timestamps — the structured `fields[]` keep the machine values, and renderers
+ * format those separately.
+ */
+export function summarizeAwardApproval(approval: AwardApproval, token?: TokenDisplay): string {
   const mode = settlementLabel(approval.settlementMode);
-  return `${mode} for ${approval.amount} units to ${approval.winner} on track ${approval.trackId}. Approval expires at ${new Date(
-    approval.expiresAt * 1000,
-  ).toISOString()}.`;
+  return `${mode} for ${formatAmount(approval.amount, token)} to ${shortAddress(approval.winner)} on track ${
+    approval.trackId
+  }. Approval expires ${formatExpiry(approval.expiresAt)}.`;
 }
 
 export function buildClearSigningManifest(input: {
@@ -36,6 +75,7 @@ export function buildClearSigningManifest(input: {
   contractName: string;
   digest: string;
   approval: AwardApproval;
+  token?: TokenDisplay;
   calldataPreview?: string;
 }): ClearSigningManifest {
   return {
@@ -46,7 +86,7 @@ export function buildClearSigningManifest(input: {
     contractName: input.contractName,
     digest: input.digest,
     calldataPreview: input.calldataPreview,
-    summary: summarizeAwardApproval(input.approval),
+    summary: summarizeAwardApproval(input.approval, input.token),
     fields: [
       { label: "Award ID", value: input.approval.awardId, format: "text" },
       { label: "Hackathon", value: input.approval.hackathonId, format: "text" },

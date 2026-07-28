@@ -17,6 +17,8 @@ export type Env = {
   TREASURY_CONTRACT_ADDRESS?: string;
   PRIZE_CLAIM_TOKEN_ADDRESS?: string;
   PAYOUT_TOKEN_ADDRESS?: string;
+  PAYOUT_TOKEN_SYMBOL?: string;
+  PAYOUT_TOKEN_DECIMALS?: string;
 
   // secrets
   SESSION_SECRET: string;
@@ -39,4 +41,17 @@ export function jobsPerCron(env: Env): number {
 /** True when the treasury address and a relayer key are both present. */
 export function canWriteChain(env: Env): boolean {
   return Boolean(env.TREASURY_CONTRACT_ADDRESS && env.TREASURY_RELAYER_PRIVATE_KEY);
+}
+
+/**
+ * Display identity of the payout token, for /health and the clear-signing manifest.
+ * The deployment — not any build-time bundle var — is the authority on what the
+ * treasury pays with.
+ */
+export function payoutTokenDisplay(env: Env): { symbol: string; decimals: number } {
+  const parsed = Number.parseInt(env.PAYOUT_TOKEN_DECIMALS ?? "6", 10);
+  return {
+    symbol: env.PAYOUT_TOKEN_SYMBOL?.trim() || "tokens",
+    decimals: Number.isInteger(parsed) && parsed >= 0 && parsed <= 18 ? parsed : 6,
+  };
 }
