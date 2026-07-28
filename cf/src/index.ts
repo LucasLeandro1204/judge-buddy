@@ -372,6 +372,34 @@ api.post("/awards/:id/approve", async (c) => {
     status: award.settlementMode === "claim_token" ? "claim_minted" : "paid_out",
     txHash,
   });
+
+  // In claim-token mode the contract has just minted a prize-claim NFT. Record it, or the winner
+  // has nothing to redeem: POST /claims/:id/redeem looks the row up and the claims list stays
+  // empty while the NFT exists on-chain. Serial and metadata are read back from the emitted
+  // ClaimMinted event rather than recomputed, so the row describes what was actually minted.
+  if (award.settlementMode === "claim_token") {
+    const minted = receipt?.logs
+      ?.map((log) => {
+        try {
+          return treasury.interface.parseLog({ topics: [...log.topics], data: log.data });
+        } catch {
+          return null; // A log from another contract, or one this ABI does not describe.
+        }
+      })
+      .find((parsed) => parsed?.name === "ClaimMinted");
+
+    await store.upsertPrizeClaim(c.env.DB, {
+      awardId,
+      claimantAccountId: award.winnerAccountId,
+      claimantEvmAddress: award.winnerEvmAddress,
+      tokenAddress: minted ? String(minted.args.claimToken) : c.env.PRIZE_CLAIM_TOKEN_ADDRESS ?? null,
+      serialNumber: minted ? String(minted.args.serialNumber) : null,
+      metadataURI: minted ? String(minted.args.metadataURI) : null,
+      status: "minted",
+      mintedTxHash: txHash,
+    });
+  }
+
   await store.recordEvent(c.env.DB, {
     scope: "award",
     source: "chain",
@@ -400,11 +428,17 @@ api.post("/claims/:id/redeem", async (c) => {
   if (!canWriteChain(c.env)) throw new HttpError(503, "Treasury is not configured on this deployment.");
 
   const treasury = getTreasuryWrite(c.env);
-  const tx = await treasury.redeemClaim(claim.awardId, { gasLimit: GAS_LIMITS.redeemClaim });
+  // keccak of the string id, not the string itself — awardId is bytes32 on the contract, and
+  // every other call site (registerSubmission, proposeAward, the approval digest) hashes it the
+  // same way. Passing the raw id here threw INVALID_ARGUMENT before it ever reached the chain.
+  const tx = await treasury.redeemClaim(toOnchainId(claim.awardId), { gasLimit: GAS_LIMITS.redeemClaim });
   const receipt = await tx.wait();
   const txHash = receipt?.hash ?? tx.hash;
 
   await store.upsertPrizeClaim(c.env.DB, { ...claim, status: "redeemed", redeemedTxHash: txHash });
+  // The contract moves the award to Redeemed here too; mirror it or the award is left reading
+  // "claim_minted" forever, next to a claim that says redeemed.
+  await store.updateAwardProposal(c.env.DB, { id: claim.awardId, status: "redeemed", txHash });
   await store.recordEvent(c.env.DB, {
     scope: "claim",
     source: "chain",
