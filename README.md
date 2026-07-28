@@ -1,214 +1,101 @@
-# JudgeBuddy (EscrowSwap Pro)
+# JudgeBuddy
 
-**Trust-minimized task escrow on [Hedera](https://hedera.com)** — clients lock **HTS / ERC-20** funds in an on-chain contract; **only the verifier** can release payout to the worker or refund the client. Off-chain orchestration, HCS audit, and a React dashboard tie the flow together.
+**The verifiable decision-and-payout layer for ecosystem programs.** AI agents rank each
+submission and attach the evidence. A Hedera contract holds the prize funds, pays the
+winners and keeps the record.
 
----
+- **Live app:** https://judge-buddy.l17s.dev
+- **Treasury on HashScan (testnet):** https://hashscan.io/testnet/contract/0xd93128FEE6773F552F5EC67FDddD3c1fa882fd69
+- **Showcase + demo video:** https://ethglobal.com/showcase/judgebuddy-nje6q
 
-## Why Hedera
+## The loop
 
-| Capability | How we use it |
-|------------|----------------|
-| **Hedera EVM (chain 296)** | `HederaTaskEscrow` — `fundTask`, verifier-only `release` / `refund` |
-| **HTS as ERC-20** | Same demo tokens (`0.0.…`) work in the UI, mirror, and `ethers` |
-| **HCS** | Optional append-only messages on create / fund / submit / verify (operator topic) |
-| **Mirror REST** | Resolve `0.0.x` accounts & tokens → `evm_address` for escrow wiring |
-| **Low, predictable fees** | Fits micro-jobs and agent payouts |
-
----
-
-## Features (judges / criteria)
-
-- **On-chain escrow** — Funds are in `HederaTaskEscrow`, not a single custodial API key (verifier still must sign `release` / `refund` from their wallet).
-- **Role separation** — Client (fund), worker (deliver), verifier (approve or reject path).
-- **Dual mode** — With `ESCROW_CONTRACT_ADDRESS`: HTS ERC-20 + EVM flow. Without it: legacy operator + HBAR/HTS demo path.
-- **Traceability** — Task store + optional **HCS** topic Mirror / HashScan links in the UI.
-- **Wallet-aware UX** — Associate / approve / fund on Hedera EVM; guards for wrong wallet vs `clientEvm` and balance checks.
-- **Hackathon shell** — Extra routes under `/hackathon/*` for event-style views (index, live, submissions, agent pipeline).
-
----
+1. **Submission arrives** — repo, demo URL, deployed contracts, track.
+2. **Evidence is gathered** — live checks against the GitHub API, the demo URL and HashScan.
+   A dead link fails the rule; a rate-limited source retries instead of failing silently.
+3. **Agents score and group** — four agents (eligibility, track fit, quality, theme
+   grouping) produce a ranked shortlist with a written rationale per project. Every output
+   is JSON-schema constrained and stored with the model that produced it.
+4. **The decision is anchored** — keccak256 of the full evaluation is written on-chain, so
+   a builder can check the rationale they received against the record.
+5. **The treasury settles** — awards at or below the organizer's threshold pay out
+   automatically. Awards above it need the judge's EIP-712 signature; the contract mints a
+   prize-claim NFT the winner redeems for the funds.
 
 ## Architecture
 
+One Cloudflare Worker serves the React app, the API and the cron scheduler. D1 holds the
+job queue, the event store and the evaluation record. Workers AI runs the scoring agents —
+no third-party model key.
+
 ```mermaid
 flowchart LR
-  subgraph client [Client browser]
-    UI[React / Vite]
-    WC[Wallet EVM]
-    UI --> WC
+  subgraph worker [Cloudflare Worker]
+    SPA[React SPA]
+    API[API · 19 routes]
+    CRON[Cron · job queue]
   end
-  subgraph hedera [Hedera]
-    RPC[Hedera EVM JSON-RPC]
-    ESC[HederaTaskEscrow]
-    TOK[HTS ERC-20]
-    TOP[HCS Topic]
-    MIR[Mirror Node]
+  D1[(D1)]
+  AI[Workers AI]
+  subgraph hedera [Hedera testnet · chain 296]
+    TRE[HackathonTreasury]
+    NFT[PrizeClaimToken + HTS collection]
+    MIR[Mirror Node REST]
   end
-  API[Express API]
-  UI --> API
-  UI --> RPC
-  WC --> ESC
-  ESC --> TOK
-  API --> TOP
+  SPA --> API
+  API --> D1
+  CRON --> D1
+  CRON --> AI
+  CRON -->|ethers| TRE
+  TRE --> NFT
   API --> MIR
-  API --> RPC
 ```
 
-1. **Frontend** — Tasks CRUD via REST; escrow txs via `ethers` + injected wallet (HashPack / MetaMask on testnet).
-2. **API** — JSON task store (`server/data/tasks.json`), mirror-backed EVM resolution, `POST /tasks/:id/onchain-sync` to align state with the contract.
-3. **Smart contract** — OpenZeppelin `SafeERC20`; task id matches API-assigned id.
+The payout rule is a contract invariant, not backend policy: `executeAutonomousPayout`
+reverts above the organizer's threshold, `ECDSA.recover` gates the signed path, and
+per-track `budget / reserved / paid` accounting guards every transfer. Each signed
+approval ships with a Ledger clear-signing manifest, so the signer reads the recipient,
+amount, track and expiry in plain language.
 
----
+## Deployed contracts (Hedera testnet)
 
-## Tech stack
+| Contract             | EVM address                                  | Hedera ID     |
+| -------------------- | -------------------------------------------- | ------------- |
+| HackathonTreasury    | `0xd93128FEE6773F552F5EC67FDddD3c1fa882fd69` | `0.0.9798703` |
+| PrizeClaimToken      | `0xAc370628C1Ba5d03d5cfB594262daf70cdB5d855` | `0.0.9798699` |
+| Payout token (jbUSD) | `0x398cAFe2C8d16BdF6c970D3e251A899A481a0D4D` | `0.0.9797625` |
 
-- **UI:** React 18, Vite, TypeScript, Tailwind, shadcn/ui, Framer Motion, React Router  
-- **Chain:** `ethers` v6, Hardhat, `@openzeppelin/contracts`, Hedera testnet EVM  
-- **Server:** Node, Express, `@hashgraph/sdk`, optional `hedera-agent-kit` / HCS helpers  
-- **Auth (optional):** Reown / WalletConnect (`VITE_WALLETCONNECT_PROJECT_ID`)
-
----
-
-## Prerequisites
-
-- Node **18+** and npm  
-- Hedera **testnet** accounts with **HBAR** + (for escrow) **USDC** or your HTS token — see [.env.example](.env.example)  
-- For live HCS + legacy transfers: operator id + key and `HCS_TOPIC_ID`
-
----
-
-## Quick start
-
-```bash
-git clone <your-repo-url> escrowswap-pro
-cd escrowswap-pro
-npm install
-cp .env.example .env
-# Edit .env — see “Configuration” below
-npm run dev:all
-```
-
-- **Web:** http://localhost:5173 (Vite default)  
-- **API:** http://localhost:3001 (`PORT` in `.env`)
-
-Health check: `GET http://localhost:3001/health`
-
----
-
-## Configuration
-
-Copy [.env.example](.env.example) to `.env` at the **repo root** (server loads the same file).
-
-**Minimum to run against the real API (no mock):**
-
-| Variable | Purpose |
-|----------|---------|
-| `VITE_ESCROW_USE_MOCK=false` | Use API + live tasks |
-| `VITE_HEDERA_API_URL=http://localhost:3001` | Backend URL |
-
-**On-chain escrow (hackathon demo):**
-
-| Variable | Purpose |
-|----------|---------|
-| `DEPLOYER_EVM_PRIVATE_KEY` | Hardhat deployer (never commit) |
-| `ESCROW_CONTRACT_ADDRESS` | Deployed `HederaTaskEscrow` (server) |
-| `VITE_ESCROW_CONTRACT_ADDRESS` | Same address (frontend) |
-| `HEDERA_EVM_RPC` / `VITE_HEDERA_EVM_RPC` | e.g. `https://testnet.hashio.io/api` |
-| `VITE_HEDERA_USDC_TOKEN_ID` | HTS id with mirror + EVM path (default demo `0.0.429274`) |
-
-**HCS + operator (optional):**
-
-| Variable | Purpose |
-|----------|---------|
-| `HEDERA_NETWORK`, `HEDERA_ACCOUNT_ID`, `HEDERA_PRIVATE_KEY` | SDK operator |
-| `HCS_TOPIC_ID` | Topic for audit messages |
-| `HEDERA_DRY_RUN=true` | Skip paid txs while iterating |
-
----
-
-## Deploy escrow contract (testnet)
-
-From repo root, after `.env` includes `DEPLOYER_EVM_PRIVATE_KEY` and RPC:
-
-```bash
-npm run compile:escrow
-npm run deploy:escrow:testnet
-```
-
-Set the printed address in **`ESCROW_CONTRACT_ADDRESS`** and **`VITE_ESCROW_CONTRACT_ADDRESS`**, then restart `dev:all`.
-
----
-
-## Judge demo script (happy path)
-
-1. Configure `.env` with escrow address + API + mock off. Restart stack.  
-2. Connect wallet / set **client** Hedera account in the app.  
-3. **Create task** — use HTS token (not HBAR) when escrow is enabled; real `0.0.x` with mirror `evm_address` for client, worker, verifier.  
-4. **Fund** — Client EVM wallet: `associate` → `approve` → `fundTask`; then **Sync on-chain state** (or it runs after fund).  
-5. **Worker** submits deliverable (API).  
-6. **Verifier** approves in app → signs **`release`** on EVM → sync → **PaidOut**.
-
-Show **HashScan** links for HCS and EVM txs from the task detail ledger section.
-
----
-
-## API overview
-
-| Method | Path | Notes |
-|--------|------|------|
-| `GET` | `/health` | Network / operator / escrow hints |
-| `GET` | `/tasks` | List tasks |
-| `GET` | `/tasks/:id` | Single task |
-| `POST` | `/tasks` | Create (body: client, worker, verifier, token, amount, …) |
-| `POST` | `/tasks/:id/fund` | Legacy funding only (409 if `escrowContract`) |
-| `POST` | `/tasks/:id/submit` | Worker submission |
-| `POST` | `/tasks/:id/verify` | Approve / reject (escrow → off-chain state + verifier txs) |
-| `POST` | `/tasks/:id/dispute` | Dispute |
-| `POST` | `/tasks/:id/onchain-sync` | Read contract; body optional `{ "txHash": "0x…" }` |
-
-Amounts are **integer strings in smallest token units** (e.g. USDC 6 decimals: `0.1` USDC → `"100000"`).
-
----
-
-## Scripts
-
-| Command | Description |
-|---------|-------------|
-| `npm run dev` | Vite dev server only |
-| `npm run dev:server` | API only (`server/`) |
-| `npm run dev:all` | Web + API |
-| `npm run build` | Production frontend build |
-| `npm run compile:escrow` | `hardhat compile` |
-| `npm run deploy:escrow:testnet` | Deploy `HederaTaskEscrow` |
-| `npm test` | Vitest |
-
----
+HTS prize-claim collection: `0.0.9798702` (JudgeBuddy Prize Claim / JBPC), owned by the
+PrizeClaimToken contract. Claims are minted to the contract and burned on redemption, so
+a winner never has to associate with the collection to be paid.
 
 ## Repository layout
 
+| Path         | Contents                                                        |
+| ------------ | --------------------------------------------------------------- |
+| `src/`       | React app (organizer, submissions and operations surfaces)      |
+| `cf/`        | Worker: API routes, agent pipeline, cron, D1 access             |
+| `packages/`  | `shared` (ABI, ids, auth) and `ledger-clear-signing` (manifest) |
+| `contracts/` | Solidity: treasury, prize-claim token, demo payout token        |
+| `hardhat/`   | Contract test suite                                             |
+| `scripts/`   | Deploy and demo bootstrap scripts                               |
+
+## Development
+
+```bash
+npm install
+npm run dev              # Vite dev server
+npm test                 # frontend tests (vitest)
+npm run test:contracts   # contract tests (hardhat)
+npm run build            # SPA build into dist/
+npx wrangler deploy      # deploy the Worker
 ```
-contracts/           # HederaTaskEscrow.sol
-scripts/             # deploy-escrow.cjs
-server/              # Express + task store + Hedera
-src/                 # React app (escrow + hackathon routes)
-src/hackathon/       # Event-style UI
-```
 
----
-
-## Security notes
-
-- Never commit **private keys** or put `DEPLOYER_EVM_PRIVATE_KEY` in `VITE_*` vars (browser bundle).  
-- `ESCROW_CONTRACT_ADDRESS` enables stricter server rules (no fake `/fund` for those tasks).  
-- Verifier **must** keep custody of their own EVM key for `release` / `refund`; the server cannot safely replace that without centralizing trust.
-
----
+Contract deployment and the on-chain demo bootstrap are scripted:
+`npm run deploy:treasury:testnet`, then `scripts/bootstrap-demo.cjs` and
+`scripts/settle-claim-award.cjs`. Copy `.env.example` to `.env` for the deploy keys; the
+deployed Worker takes its configuration from `wrangler.jsonc` vars and `wrangler secret`.
 
 ## License
 
-Apache-2.0 (see SPDX header in `contracts/HederaTaskEscrow.sol`).
-
----
-
-## Acknowledgements
-
-Built with **Hedera** (EVM + HTS + HCS), **OpenZeppelin**, **Hashio / mirror** endpoints, and the **ethers** ecosystem.
+[Apache-2.0](LICENSE)
