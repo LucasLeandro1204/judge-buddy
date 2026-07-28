@@ -59,8 +59,16 @@
     // Deployed 2026-07-27 to Hedera testnet. These live here rather than being passed as
     // `wrangler deploy --var` flags: CLI vars are per-invocation and a later deploy without them
     // silently wipes the values, which leaves the pipeline running with the chain disabled.
-    "TREASURY_CONTRACT_ADDRESS": "0xF862f3e48b05D78cE3CE1Ce0c8d16b70e54111fE",
-    "PRIZE_CLAIM_TOKEN_ADDRESS": "0x0F65EaA3E899C0d359ed6f10a5b094B0ADAbE131",
+    //
+    // Second generation. The first treasury (0xF862f3e4…11fE) had to be retired: its claim token
+    // was transferred to it before the HTS collection existed, and initializeClaimCollection is
+    // onlyOwner with no passthrough, so the claim branch was unreachable for good. The treasury
+    // now exposes that passthrough — see HackathonTreasury.initializeClaimCollection.
+    "TREASURY_CONTRACT_ADDRESS": "0xd93128FEE6773F552F5EC67FDddD3c1fa882fd69",
+    "PRIZE_CLAIM_TOKEN_ADDRESS": "0xAc370628C1Ba5d03d5cfB594262daf70cdB5d855",
+
+    // Unchanged across the redeploy: the payout asset is named per hackathon at bootstrap,
+    // so it is not tied to a treasury instance.
     "PAYOUT_TOKEN_ADDRESS": "0x398cAFe2C8d16BdF6c970D3e251A899A481a0D4D"
   }
 
@@ -68,7 +76,7 @@
   //   SESSION_SECRET               HMAC key for signed session cookies
   //   TREASURY_RELAYER_PRIVATE_KEY agent relayer, signs registerSubmission/proposeAward/payout
   //
-  // Contract addresses are set as vars by scripts/deploy-cloudflare.sh after the Hedera
-  // deploy, so they are not duplicated here:
-  //   TREASURY_CONTRACT_ADDRESS, PRIZE_CLAIM_TOKEN_ADDRESS, PAYOUT_TOKEN_ADDRESS
+  // HTS prize-claim collection: 0.0.9798702 (JudgeBuddy Prize Claim / JBPC), owned by the
+  // PrizeClaimToken contract. Claims are minted to that contract and burned on redemption, so a
+  // winner never needs to associate with the collection to be paid.
 }
