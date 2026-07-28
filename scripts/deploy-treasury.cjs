@@ -16,6 +16,9 @@
  *   DEPLOYER_EVM_PRIVATE_KEY  required, ECDSA hex key with testnet HBAR
  *   TREASURY_AGENT_RELAYER    optional, defaults to the deployer address
  *   CLAIM_COLLECTION_HBAR     optional, HBAR attached to HTS token creation (default 20)
+ *   REUSE_PAYOUT_TOKEN        optional, address of an existing payout token to keep instead of
+ *                             deploying a fresh one. The payout asset is named per hackathon at
+ *                             bootstrap, so it survives a treasury redeploy untouched.
  */
 const hre = require("hardhat");
 
@@ -109,14 +112,19 @@ async function main() {
   console.log("      Owner is now:", treasuryAddress);
 
   // 5 — Payout asset for the testnet demo.
-  console.log("[5/5] Deploying DemoPayoutToken...");
-  const PayoutFactory = await hre.ethers.getContractFactory("DemoPayoutToken");
-  const payout = await PayoutFactory.deploy(deployer.address, {
-    gasLimit: await gasFor(PayoutFactory, [deployer.address], "DemoPayoutToken"),
-  });
-  await payout.waitForDeployment();
-  const payoutAddress = await payout.getAddress();
-  console.log("      DemoPayoutToken:", payoutAddress, "(6 decimals, public faucet)");
+  let payoutAddress = process.env.REUSE_PAYOUT_TOKEN || "";
+  if (payoutAddress) {
+    console.log("[5/5] Reusing existing DemoPayoutToken:", payoutAddress);
+  } else {
+    console.log("[5/5] Deploying DemoPayoutToken...");
+    const PayoutFactory = await hre.ethers.getContractFactory("DemoPayoutToken");
+    const payout = await PayoutFactory.deploy(deployer.address, {
+      gasLimit: await gasFor(PayoutFactory, [deployer.address], "DemoPayoutToken"),
+    });
+    await payout.waitForDeployment();
+    payoutAddress = await payout.getAddress();
+    console.log("      DemoPayoutToken:", payoutAddress, "(6 decimals, public faucet)");
+  }
 
   const env = [
     `TREASURY_CONTRACT_ADDRESS=${treasuryAddress}`,
