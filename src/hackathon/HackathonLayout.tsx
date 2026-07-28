@@ -5,6 +5,7 @@ import {
   Activity,
   ArrowLeft,
   ClipboardCheck,
+  ExternalLink,
   LayoutGrid,
   Loader2,
   LogOut,
@@ -151,6 +152,19 @@ function SidebarBody({ onNavigate }: { onNavigate?: () => void }) {
           <ArrowLeft className="h-3 w-3" />
           Treasury Home
         </Link>
+
+        <a
+          href="https://www.linkedin.com/in/lucasleandro1204/"
+          target="_blank"
+          rel="author me noopener noreferrer"
+          aria-label="Built by Lucas Leandro Ramos — view LinkedIn profile"
+          className="flex items-center gap-2 px-1 text-[10px] font-mono text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <ExternalLink className="h-3 w-3" />
+          <span>
+            Built by <span className="text-foreground">Lucas Leandro Ramos</span>
+          </span>
+        </a>
       </div>
     </>
   );
